@@ -1,9 +1,4 @@
 huggingface/
-filtered_sample3.jsonl
-filtered_sample4.jsonl
-filtered_sample5.jsonl
-finalconvos.jsonl
-sample5.jsonl
 wandb/
 dpo-training/wandb/
 dpo-training/tulu-3-8b-anthropic-dpo-10k-slurm/
