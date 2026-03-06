@@ -1,0 +1,2 @@
+run_name,output_dir,lr,batch_size,grad_accum,effective_bs,beta,epochs,best_eval_loss,final_train_loss,train_runtime,samples_per_sec
+tulu3-8B_pt-anthropic-769_13532,/srv/nlprx-lab/share5/sbanerjee332/dpo-training/models/tulu3-8B_pt-anthropic-769_13532,0.0002,1,4,4,1,1,0.6217779517173767,0.6626914444582901,476.5837,1.454

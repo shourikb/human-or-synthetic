@@ -1,4 +1,10 @@
 huggingface/
 wandb/
 dpo-training/wandb/
-dpo-training/tulu-3-8b-anthropic-dpo-10k-slurm/
+dpo-training/models/
+dpo-training/rlhf/
+dpo-training/unsloth_compiled_cache/
+768test/
+2000_offset0_logs/
+*.out
+*.err

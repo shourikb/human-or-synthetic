@@ -1,8 +1,13 @@
+# DEPRECATED - see bin_filtering.py for updated version with more features and better structure
+
+
 import matplotlib.pyplot as plt
 import json
 import re
 from collections import Counter
 from transformers import AutoTokenizer
+from datasets import load_dataset
+
 
 BIN_SIZE = 50
 
@@ -82,6 +87,74 @@ def compute_averages_from_jsonl(path, use_combined=False, return_selected=False)
     else:
         return avg_tokens, avg_bigrams, avg_convo_length, avg_turn_length, convo_lengths, word_to_token_ratio, unique_bigram_to_total_bigram_ratio
 
+def compute_shp_stats(use_prompt_only=False):
+    """
+    Computes statistics for the Stanford Human Preferences (SHP) dataset.
+    
+    SHP format:
+        {
+            "history": "<prompt text>",
+            "human_ref_A": "<response A>",
+            "human_ref_B": "<response B>",
+            "score": 1  (means A is preferred; 0 means B is preferred)
+        }
+    """
+    dataset = load_dataset("stanfordnlp/SHP", split="train")
+
+    convo_lengths = []
+    total_token_counts = 0
+    total_unique_bigram_counts = 0
+    total_bigrams = 0
+    total_turns = 0
+    global_unique_words = set()
+    count = 0
+
+    for item in dataset:
+        prompt = item["history"]
+        resp_A = item["human_ref_A"]
+        resp_B = item["human_ref_B"]
+
+        # Build text depending on preference
+        # Prefer "text that forms the preference pair" similar to Anthropic
+        if use_prompt_only:
+            text = prompt
+        else:
+            # Use both responses to match preference-pair structure
+            text = prompt + "\n" + resp_A + "\n" + resp_B
+
+        # Tokenize
+        tokens = tokenize(text)
+        convo_len = len(tokens)
+        convo_lengths.append(convo_len)
+
+        # Token/bigram stats
+        total_token_counts += len(set(tokens))
+
+        bgs = list(bigrams(text))
+        total_unique_bigram_counts += len(set(bgs))
+        total_bigrams += len(bgs)
+
+        total_turns += text.count("\n")
+        global_unique_words.update(tokens)
+        count += 1
+
+    avg_tokens = total_token_counts / count
+    avg_bigrams = total_unique_bigram_counts / count
+    avg_convo_length = sum(convo_lengths) / count
+    avg_turn_length = total_turns / count
+    word_to_token_ratio = len(global_unique_words) / sum(convo_lengths)
+    ubtb_ratio = total_unique_bigram_counts / total_bigrams
+
+    return {
+        "avg_distinct_tokens": avg_tokens,
+        "avg_distinct_bigrams": avg_bigrams,
+        "avg_conversation_length": avg_convo_length,
+        "avg_turn_length": avg_turn_length,
+        "word_to_token_ratio": word_to_token_ratio,
+        "unique_bigram_to_total_bigram_ratio": ubtb_ratio,
+        "convo_lengths": convo_lengths
+    }
+
 # File paths
 file1_path = 'anthropic.jsonl'  # just 'chosen'
 file2_path = 'filtered_sample5.jsonl'  # 'chosen' + 'response_a'
@@ -152,3 +225,26 @@ with open("finalconvos.jsonl", "w") as out_f:
         out_f.write(json.dumps(convo) + "\n")
 
 print(f"Saved {len(selected_convos_2)} selected conversations to finalconvos.jsonl")
+
+# stats_shp = compute_shp_stats()
+
+# print("\n=== SHP Dataset Statistics ===")
+# print(f"Avg. distinct tokens:       {stats_shp['avg_distinct_tokens']:.2f}")
+# print(f"Avg. distinct bigrams:      {stats_shp['avg_distinct_bigrams']:.2f}")
+# print(f"Avg. conversation length:   {stats_shp['avg_conversation_length']:.2f} tokens")
+# print(f"Avg. turn length:           {stats_shp['avg_turn_length']:.2f}")
+# print(f"Word/token ratio:           {stats_shp['word_to_token_ratio']:.4f}")
+# print(f"Unique bigram/total ratio:  {stats_shp['unique_bigram_to_total_bigram_ratio']:.4f}")
+# print(f"Examples processed:         {len(stats_shp['convo_lengths'])}")
+
+# plt.figure(figsize=(8, 5))
+# bins = range(0, max(stats_shp["convo_lengths"]) + 50, 50)
+
+# plt.hist(stats_shp["convo_lengths"], bins=bins, color='purple', alpha=0.7)
+# plt.xlabel('Token Length')
+# plt.ylabel('Number of Examples')
+# plt.title('Histogram of Token Lengths — SHP Dataset')
+# plt.grid(True, linestyle='--', alpha=0.7)
+# plt.tight_layout()
+# plt.savefig("histogram_shp.png")
+# plt.close()

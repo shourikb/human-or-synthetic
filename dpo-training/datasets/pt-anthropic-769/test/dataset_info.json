@@ -1,0 +1,42 @@
+{
+  "builder_name": "json",
+  "citation": "",
+  "config_name": "default",
+  "dataset_name": "json",
+  "dataset_size": 67080738,
+  "description": "",
+  "download_checksums": {
+    "/srv/nlprx-lab/share5/sbanerjee332/dpo-training/datasets/pt-anthropic.jsonl": {
+      "num_bytes": 69112146,
+      "checksum": null
+    }
+  },
+  "download_size": 69112146,
+  "features": {
+    "chosen": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "rejected": {
+      "dtype": "string",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": "",
+  "size_in_bytes": 136192884,
+  "splits": {
+    "train": {
+      "name": "train",
+      "num_bytes": 67080738,
+      "num_examples": 43835,
+      "dataset_name": "json"
+    }
+  },
+  "version": {
+    "version_str": "0.0.0",
+    "major": 0,
+    "minor": 0,
+    "patch": 0
+  }
+}

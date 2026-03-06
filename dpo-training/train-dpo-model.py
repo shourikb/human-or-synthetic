@@ -6,8 +6,27 @@ import torch
 import os
 from datetime import datetime
 import wandb
+import argparse
 
 torch.set_default_dtype(torch.bfloat16)
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="DPO Training Script")
+
+    parser.add_argument("--learning_rate", type=float, default=2e-4,
+                        help="Learning rate for the optimizer.")
+
+    parser.add_argument("--per_device_batch_size", type=int, default=1,
+                        help="Batch size per device during training.")
+
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=4,
+                        help="Number of updates steps to accumulate before performing a backward/update pass.")
+
+    parser.add_argument("--output_dir", type=str, default="dpo_model_output",
+                        help="Directory to save the trained model and checkpoints.")
+    
+    # Add more hyperparameters as needed
+    return parser.parse_args()
 
 def load_model_and_tokenizer(model_name="allenai/Llama-3.1-Tulu-3-8B-SFT", custom_adapter=None):
     bfloat16_supported = torch.cuda.is_bf16_supported()
@@ -56,6 +75,7 @@ def load_model_and_tokenizer(model_name="allenai/Llama-3.1-Tulu-3-8B-SFT", custo
 
     print("Final LoRA model info:")
     model.print_trainable_parameters()
+
     return model, tokenizer
 
 def train_model(
@@ -67,6 +87,8 @@ def train_model(
     logging_dir,
     save_dir,
     project_name,
+    batch_size=1,
+    gradient_accumulation_steps=4,
     max_seq_length=16384,
     num_epochs=1,
     learning_rate=2e-4,
@@ -76,10 +98,10 @@ def train_model(
     run_name = f"{current_time}_{project_name}_{max_seq_length}"
 
     if os.environ.get("RANK", "0") == "0":
-        wandb.init(project=project_name, name=run_name)
+        wandb.init(project="dpo_gridsearch", name=run_name)
 
-    EVAL_STEPS = 10
-    SAVE_STEPS = 50
+    EVAL_STEPS = 1
+    SAVE_STEPS = 100
     NUM_WORKERS = 16
 
     is_bf16 = torch.cuda.is_bf16_supported()
@@ -92,9 +114,9 @@ def train_model(
         eval_steps = EVAL_STEPS
 
     training_args = DPOConfig(
-        per_device_train_batch_size=1,
-        per_device_eval_batch_size=1,
-        gradient_accumulation_steps=4,
+        per_device_train_batch_size=batch_size,
+        per_device_eval_batch_size=batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
         warmup_steps=5,
         num_train_epochs=num_epochs,
         learning_rate=learning_rate,
@@ -114,7 +136,7 @@ def train_model(
         save_steps=SAVE_STEPS,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
-        save_total_limit=20,
+        save_total_limit=10,
         dataloader_num_workers=NUM_WORKERS,
         dataloader_prefetch_factor=2,
         remove_unused_columns=False,
@@ -128,7 +150,7 @@ def train_model(
     # model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     trainer_kwargs = {
         "model": model,
-        "train_dataset": train_dataset['train'],
+        "train_dataset": train_dataset,
         "args": training_args,
         "processing_class": tokenizer,
     }
@@ -160,30 +182,53 @@ def train_model(
 
     return model, tokenizer
 
-TRAIN_DATASET = "../anthropic.jsonl"
-CHECKPOINT_PATH = None # "tulu-3-8b-anthropic-dpo-10k/checkpoints/checkpoint-4900"
-base_save_dir = "tulu-3-8b-anthropic-dpo-10k-slurm"
 
-model_name =  "allenai/Llama-3.1-Tulu-3-8B-SFT"
-model, tokenizer = load_model_and_tokenizer(model_name=model_name, custom_adapter=None)
+def main():
+    args = parse_args()
+
+    TRAIN_DATASET = "../anthropic_subset.jsonl"
+    CHECKPOINT_PATH = None # "tulu-3-8b-anthropic-dpo-10k/checkpoints/checkpoint-4900"
+    TRAIN_DATASET_SIZE = 141
+    EVAL_PERCENT = 0.03
+    eval_size  = 15 if TRAIN_DATASET_SIZE < 1000 else int(TRAIN_DATASET_SIZE * EVAL_PERCENT)
+
+    base_save_dir = args.output_dir
+
+    model_name = "allenai/Llama-3.1-Tulu-3-8B-SFT"
+
+    model, tokenizer = load_model_and_tokenizer(model_name=model_name, custom_adapter=None)
 
 
-raw = load_dataset("json", data_files={"train": TRAIN_DATASET})
-raw["train"] = raw["train"].select(range(10000))
-save_dir = f"{base_save_dir}/model"
-checkpoint_dir = f"{base_save_dir}/checkpoints"
-logging_dir = f"{base_save_dir}/logging"
+    raw = load_dataset("json", data_files={"train": TRAIN_DATASET})
+    raw["train"] = raw["train"].select(range(TRAIN_DATASET_SIZE))
+    raw_split = raw["train"].train_test_split(
+        test_size=eval_size,
+        shuffle=True,
+        seed=42,
+    )
 
-model, tokenizer = model, tokenizer = train_model(
-            model,
-            tokenizer,
-            raw,
-            None,
-            checkpoint_dir=checkpoint_dir,
-            logging_dir=logging_dir,
-            save_dir=save_dir,
-            project_name=base_save_dir,
-            num_epochs=5,
-            learning_rate=2e-4,
-            resume_checkpoint_path=CHECKPOINT_PATH,
-        )
+    train_dataset = raw_split["train"]
+    eval_dataset = raw_split["test"]
+    save_dir = f"{base_save_dir}/model"
+    checkpoint_dir = f"{base_save_dir}/checkpoints"
+    logging_dir = f"{base_save_dir}/logging"
+
+
+    model, tokenizer = model, tokenizer = train_model(
+                model,
+                tokenizer,
+                train_dataset,
+                eval_dataset,
+                checkpoint_dir=checkpoint_dir,
+                logging_dir=logging_dir,
+                save_dir=save_dir,
+                project_name=base_save_dir,
+                batch_size=args.per_device_batch_size,
+                gradient_accumulation_steps=args.gradient_accumulation_steps,
+                num_epochs=1,
+                learning_rate=args.learning_rate,
+                resume_checkpoint_path=CHECKPOINT_PATH,
+            )
+
+if __name__ == "__main__":
+    main()

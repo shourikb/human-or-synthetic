@@ -24,7 +24,7 @@ def chop_after_prefix(s, prefix):
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Run batch processing on specific GPU')
-    parser.add_argument('--gpu_id', type=int, default=0, help='GPU ID to use')
+    parser.add_argument('--gpu_id', type=str, default="0", help='Comma-separated list of GPU IDs to use')
     parser.add_argument('--batch_start', type=int, default=0, help='Starting batch index')
     parser.add_argument('--batch_count', type=int, default=1, help='Number of batches to process')
     parser.add_argument('--output_suffix', type=str, default="", help='Suffix for output files')
@@ -107,11 +107,14 @@ def main():
 
     # os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
     # print(f"Running on GPU {args.gpu_id}")
+    gpu_ids = [x.strip() for x in args.gpu_id.split(',')]
+    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(gpu_ids)
+    print(f"Using GPU ID: {args.gpu_id}")
 
     with open("filtered_personas.jsonl", "r", encoding="utf-8") as file:
         personas = [next(iter(json.loads(line).values())) for line in file]
 
-    model_name =  "allenai/Llama-3.1-Tulu-3-8B-SFT" 
+    model_name = "allenai/Llama-3.1-Tulu-3-8B-SFT" 
     # model_name = "unsloth/Meta-Llama-3.1-8b-instruct"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 

@@ -2,7 +2,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import torch
 import random
 
-trained_model_dir = "tulu-3-8b-anthropic-dpo-10k-slurm/model"
+trained_model_dir = "tulu-3-8b-anthropic-dpo-10k/model"
 base_model_name = "allenai/Llama-3.1-Tulu-3-8B-SFT"
 
 SEED = 42
