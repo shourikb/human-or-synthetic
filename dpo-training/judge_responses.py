@@ -114,7 +114,7 @@ dictionary of the form
 "model_2": rank_2
 }}
 
-Do not include any reasoning or explanation. Do not include any text before or after the JSON. Your entire response must be parseable by json.loads().
+Do not include any text before or after the JSON. Your entire response must be parseable by json.loads().
 Please provide the ranking that the majority of humans would give.
 """,
         },
