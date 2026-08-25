@@ -1,10 +1,28 @@
-huggingface/
-wandb/
-dpo-training/wandb/
-dpo-training/models/
-dpo-training/rlhf/
-dpo-training/unsloth_compiled_cache/
-768test/
-2000_offset0_logs/
+# Ignore everything by default
+*
+
+# Un-ignore directories so git will look inside them
+!*/
+
+# Un-ignore the file types you actually want tracked
+!*.py
+!*.yaml
+!*.yml
+!*.sh
+
+# Explicitly re-ignore the risky extensions even inside otherwise-allowed dirs
+# (belt-and-suspenders on top of the deny-all above)
+*.jsonl
 *.out
 *.err
+*.txt
+huggingface/
+wandb/
+unsloth_compiled_cache/
+models/
+models*/
+
+# A few common repo files worth keeping
+!.gitignore
+!README.md
+!requirements.txt

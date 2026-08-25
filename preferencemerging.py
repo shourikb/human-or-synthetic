@@ -3,15 +3,15 @@ import os
 import glob
 import argparse
 
-BASE_DIR = '/srv/nlprx-lab/share5/sbanerjee332'
-NUM_SAMPLES = 20000
+BASE_DIR = '/coc/pskynet5/sbanerjee332'
+NUM_SAMPLES = 110448
 VOTES = 32
-DATASET = "synthetic"
-TOTAL_RUNS = 6
+DATASET = "summarization"
+TOTAL_RUNS = 12
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--global_offset', type=int, default=0, help='Offset used during generation')
-parser.add_argument('--total_conversations', type=int, default=20000, help='Total conversations expected')
+parser.add_argument('--total_conversations', type=int, default=110448, help='Total conversations expected')
 args = parser.parse_args()
 
 input_pattern = os.path.join(BASE_DIR, f"majority_votes_{VOTES}_{DATASET}_run*_offset{args.global_offset}.jsonl")

@@ -46,9 +46,9 @@ if __name__ == "__main__":
 
     print(run_config)
 
-    training_args.learning_rate = args.learning_rate
-    training_args.per_device_train_batch_size = args.per_device_train_batch_size
-    training_args.gradient_accumulation_steps = args.gradient_accumulation_steps
+    # training_args.learning_rate = args.learning_rate
+    # training_args.per_device_train_batch_size = args.per_device_train_batch_size
+    # training_args.gradient_accumulation_steps = args.gradient_accumulation_steps
 
 
     if run_config.do_training:

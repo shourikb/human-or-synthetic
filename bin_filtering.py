@@ -7,9 +7,9 @@ from datasets import load_dataset
 
 BIN_SIZE = 50
 
-NEW_SOURCE_FILE   = "filtered_sample6.jsonl"
-EXISTING_CONVOS   = "finalconvos.jsonl"
-OUTPUT_FILE       = "finalconvos2.jsonl"
+NEW_SOURCE_FILE   = "filtered_sample7.jsonl"
+EXISTING_CONVOS   = "finalconvos2.jsonl"
+OUTPUT_FILE       = "finalconvos3.jsonl"
 ANTHROPIC_FILE    = "dpo-training/datasets/pt-anthropic.jsonl"
 
 model_name = "allenai/Llama-3.1-Tulu-3-8B-SFT"
@@ -102,26 +102,23 @@ print(f"\nLoading existing conversations from {EXISTING_CONVOS}...")
 existing_convos = []
 existing_bins_used = Counter()
 
-with open(EXISTING_CONVOS, 'r') as f:
-    for line in f:
-        if not line.strip():
-            continue
-        item = json.loads(line)
-        text = item['conversation'] + " " + item['response_A']
-        convo_len = len(tokenize(text))
-        bin_id = get_bin(convo_len, BIN_SIZE)
-        existing_bins_used[bin_id] += 1
-        existing_convos.append(item)
+if EXISTING_CONVOS:
+    with open(EXISTING_CONVOS, 'r') as f:
+        for line in f:
+            if not line.strip():
+                continue
+            item = json.loads(line)
+            text = item['conversation'] + " " + item['response_A']
+            convo_len = len(tokenize(text))
+            bin_id = get_bin(convo_len, BIN_SIZE)
+            existing_bins_used[bin_id] += 1
+            existing_convos.append(item)
+    print(f"Loaded {len(existing_convos)} existing conversations.")
+else:
+    print("No existing conversations specified, starting fresh.")
 
-print(f"Loaded {len(existing_convos)} existing conversations.")
 
-
-# ── Step 3: figure out how many MORE we can take from new source per bin ──────
-# The new source is larger, so scale up the target proportionally.
-# We count how many conversations are available in the new source per bin,
-# then for each bin take as many as are available while respecting the
-# Anthropic ratio relative to the other bins.
-
+# ── Step 3: figure out how many we can take to match Anthropic distribution ──
 print(f"\nScanning {NEW_SOURCE_FILE} to count available conversations per bin...")
 available_per_bin = Counter()
 available_items_per_bin = {}
@@ -139,26 +136,25 @@ with open(NEW_SOURCE_FILE, 'r') as f:
 
 print(f"Total available in new source: {sum(available_per_bin.values())}")
 
-# For each bin, the max we can take is limited by availability.
-# Find the largest N such that for all bins: N * anthropic_probs[bin] <= available[bin]
-# i.e. N <= available[bin] / anthropic_probs[bin] for all bins with nonzero prob
-max_n = float('inf')
-for bin_id, prob in anthropic_probs.items():
-    if prob > 0:
-        available = available_per_bin.get(bin_id, 0)
-        max_n = min(max_n, available / prob)
+# Phase 1: fill each bin as much as possible up to Anthropic proportions
+# For each bin, take min(available, anthropic_target) independently
+# First find what a "fully filled" Anthropic distribution would look like at our scale
+total_available = sum(available_per_bin.values())
 
-max_n = int(max_n)
-print(f"Max additional conversations while preserving distribution: {max_n}")
+anthropic_bin_targets = {}
+for b in anthropic_bins:
+    prob = anthropic_probs.get(b, 0)
+    ideal = int(prob * total_available)  # ideal count if we had unlimited data
+    available = max(0, available_per_bin.get(b, 0) - existing_bins_used.get(b, 0))
+    anthropic_bin_targets[b] = min(ideal, available)  # take as much as we can
 
-# Compute per-bin targets for the new source
-new_bin_targets = {b: int(anthropic_probs.get(b, 0) * max_n) for b in anthropic_bins}
+print(f"Anthropic bin targets: {anthropic_bin_targets}")
 
-
-# ── Step 4: select new conversations from new source ─────────────────────────
+# ── Step 4: select conversations from new source ─────────────────────────────
 print(f"\nSelecting new conversations from {NEW_SOURCE_FILE}...")
 new_convos = []
 new_bins_used = Counter()
+leftover_items = {}  # items not used in phase 1
 
 with open(NEW_SOURCE_FILE, 'r') as f:
     for line in f:
@@ -169,13 +165,47 @@ with open(NEW_SOURCE_FILE, 'r') as f:
         convo_len = len(tokenize(text))
         bin_id = get_bin(convo_len, BIN_SIZE)
 
-        if new_bins_used[bin_id] >= new_bin_targets.get(bin_id, 0):
-            continue
+        if new_bins_used[bin_id] < anthropic_bin_targets.get(bin_id, 0):
+            new_bins_used[bin_id] += 1
+            new_convos.append(item)
+        else:
+            leftover_items.setdefault(bin_id, []).append(item)
 
-        new_bins_used[bin_id] += 1
+print(f"Selected {len(new_convos)} conversations matching Anthropic distribution.")
+
+# Phase 2: take remaining convos preserving current distribution
+current_total = len(existing_convos) + len(new_convos)
+current_bins = existing_bins_used + new_bins_used
+current_total_bins = sum(current_bins.values())
+current_probs = {k: v / current_total_bins for k, v in current_bins.items()} if current_total_bins else {}
+
+all_leftovers = [(bin_id, item) for bin_id, items in leftover_items.items() for item in items]
+total_leftovers = len(all_leftovers)
+
+# Find max we can add while preserving current distribution
+max_extra = float('inf')
+for bin_id, prob in current_probs.items():
+    if prob > 0:
+        available_extra = len(leftover_items.get(bin_id, []))
+        if available_extra == 0:
+            continue
+        max_extra = min(max_extra, available_extra / prob)
+
+if max_extra == float('inf'):
+    max_extra = 0
+
+max_extra = int(max_extra)
+print(f"Max additional conversations preserving current distribution: {max_extra}")
+
+extra_bin_targets = {b: int(prob * max_extra) for b, prob in current_probs.items()}
+extra_bins_used = Counter()
+
+for bin_id, item in all_leftovers:
+    if extra_bins_used[bin_id] < extra_bin_targets.get(bin_id, 0):
+        extra_bins_used[bin_id] += 1
         new_convos.append(item)
 
-print(f"Selected {len(new_convos)} new conversations.")
+print(f"Selected {len(new_convos)} total new conversations (Anthropic fill + extras).")
 
 
 # ── Step 5: write finalconvos2 = existing + new ───────────────────────────────
@@ -193,7 +223,7 @@ print(f"  - New (from {NEW_SOURCE_FILE}): {len(new_convos)}")
 
 # ── Step 6: verify final bin distribution ────────────────────────────────────
 print("\nVerifying final bin distribution...")
-final_bins = existing_bins_used + new_bins_used
+final_bins = existing_bins_used + new_bins_used + extra_bins_used
 total_final = sum(final_bins.values())
 final_probs = {k: v / total_final for k, v in final_bins.items()}
 

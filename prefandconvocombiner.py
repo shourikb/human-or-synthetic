@@ -1,9 +1,9 @@
 import json
 from collections import Counter
 
-file1_path = "finalconvos.jsonl"  # contains "conversation", "response_A", "response_B"
-file2_path = "majority_votes_20000_synthetic_merged_offset0.jsonl"  # contains "normal answer"
-output_path = "synthetic_data2.jsonl"
+file1_path = "finalconvos3.jsonl"  # contains "conversation", "response_A", "response_B"
+file2_path = "majority_votes_all_synthetic_merged.jsonl"  # contains "normal answer"
+output_path = "full_synthetic_data.jsonl"
 
 total_read = 0
 total_skipped = 0

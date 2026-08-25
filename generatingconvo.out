@@ -1,8 +1,0 @@
-INFO 03-01 16:26:59 [__init__.py:235] Automatically detected platform cuda.
-INFO 03-01 16:26:59 [__init__.py:235] Automatically detected platform cuda.
-INFO 03-01 16:26:59 [__init__.py:235] Automatically detected platform cuda.
-INFO 03-01 16:26:59 [__init__.py:235] Automatically detected platform cuda.
-Using GPU ID: 1
-Using GPU ID: 2
-Using GPU ID: 3
-Using GPU ID: 0

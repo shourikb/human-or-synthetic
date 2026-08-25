@@ -2,10 +2,10 @@ import json
 import re
 
 # adjust this to your actual file path
-file_path = "sample5.jsonl"
-file_path_preference = "majority_votes_20000_synthetic_merged_offset0.jsonl"
+file_paths = ["sample5.jsonl", "sample6.jsonl", "sample7.jsonl"] #["sample9.jsonl"]
+file_path_preference = "majority_votes_helpfulness/majority_votes_all_synthetic_merged.jsonl" # "majority_votes_110448_summarization_merged_offset0.jsonl"
 
-SCALING_CONSTANT = 57856 / 45793
+SCALING_CONSTANT = 1 # 214528 / 105882
 NUM_SAMPLES = 32
 
 total_input = 0
@@ -16,21 +16,22 @@ lines_preference = 0
 total_input_preference = 0
 total_output_preference = 0
 
-with open(file_path, "r") as f:
-    for line in f:
-        data = json.loads(line)
-        info = data.get("info", "")
+for file_path in file_paths:
+    with open(file_path, "r") as f:
+        for line in f:
+            data = json.loads(line)
+            info = data.get("info", "")
 
-        # find the token counts using regex
-        input_match = re.search(r"Total Input Tokens:\s*(\d+)", info)
-        output_match = re.search(r"Total Output Tokens:\s*(\d+)", info)
+            # find the token counts using regex
+            input_match = re.search(r"Total Input Tokens:\s*(\d+)", info)
+            output_match = re.search(r"Total Output Tokens:\s*(\d+)", info)
 
-        if input_match:
-            total_input += int(input_match.group(1))
-        if output_match:
-            total_output += int(output_match.group(1))
-        
-        lines += 1
+            if input_match:
+                total_input += int(input_match.group(1))
+            if output_match:
+                total_output += int(output_match.group(1))
+            
+            lines += 1
 
 with open(file_path_preference, "r") as f:
     for line in f:
@@ -83,3 +84,5 @@ print(f"Output preference cost: ${total_output_preference_cost:.4f}")
 print(f"Total input cost: ${total_input_cost + total_input_preference_cost:.4f}")
 print(f"Total output cost: ${total_output_cost + total_output_preference_cost:.4f}")
 print(f"Estimated cost: ${total_cost:.4f}")
+print(f"Lines: {lines}")
+print(f"Lines preference: {lines_preference}")

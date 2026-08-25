@@ -10,7 +10,7 @@ import os
 import random
 import sys
 
-BASE_DIR = '/srv/nlprx-lab/share5/sbanerjee332'
+BASE_DIR = '/coc/pskynet5/sbanerjee332'
 file1_path = os.path.join(BASE_DIR, 'anthropic_subset.jsonl')
 file2_path = os.path.join(BASE_DIR, 'finalconvos.jsonl')
 file3_path = os.path.join(BASE_DIR, 'dpo-training/evalresults.jsonl')

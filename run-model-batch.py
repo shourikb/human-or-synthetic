@@ -225,7 +225,7 @@ def main():
         for i in range(len(information)):
             information[i] += "\nTotal Input Tokens: " + str(input_tokens[i]) + "\nTotal Output Tokens: " + str(tokens[i]) + "\n"
 
-        with open("sample6.jsonl", "a", encoding="utf-8") as f:
+        with open("sample7.jsonl", "a", encoding="utf-8") as f:
             for i in range(len(all_outputs)):
                 json_entry = {
                     "info": information[i] + f"\nGPU id: {args.gpu_id}",
@@ -240,6 +240,8 @@ def main():
         with open("batch_human_prompts.txt", "a", encoding="utf-8") as f:
             for response in first_turn:
                 f.write(response)
+
+    print("Done with all batches.")
 
 if __name__ == "__main__":
     main()

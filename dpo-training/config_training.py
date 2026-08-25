@@ -13,7 +13,7 @@ def dpo_batch_size(dataset_size: int):
     return 1
 
 def effective_batch_size(dataset_size: int):
-    return 4
+    return 16
 
 class ModelLoadConfig(BaseModel):
     max_seq_length: str = 1024 
@@ -21,9 +21,9 @@ class ModelLoadConfig(BaseModel):
     load_in_4bit: bool = False 
 
 class LoraConfig(BaseModel):
-    r: int = 32
+    r: int = 16 # 32
     target_modules: list = ["q_proj", "k_proj", "v_proj", "o_proj",
-                            "gate_proj", "up_proj", "down_proj",]
+                           "gate_proj", "up_proj", "down_proj",]
     lora_alpha: int = 32
     lora_dropout: int = 0
     bias: str = "none"
@@ -37,7 +37,7 @@ class TrainingArgumentsConfig(BaseModel):
     per_device_eval_batch_size: int = 8
     eval_steps: float = 19
     logging_steps: int = 1
-    do_eval: bool = True
+    do_eval: bool = False
     eval_strategy: str = "no"
     gradient_accumulation_steps: int = 4
     warmup_ratio: int = 0.1
@@ -51,8 +51,8 @@ class TrainingArgumentsConfig(BaseModel):
 
 class DPOTrainingConfig(TrainingArgumentsConfig):
     beta: float = 1
-    learning_rate: float = 2e-4
-    num_train_epochs: int = 1
+    learning_rate: float = 5e-6
+    num_train_epochs: int = 2
     per_device_eval_batch_size: int = 1
 
 

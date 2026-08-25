@@ -54,7 +54,7 @@ def get_random_train_subset(dataset: DatasetDict, total_size: int, seed: int) ->
     else:
         # Split the train data into train and test
         # Take a small portion for test (e.g., 10% or a fixed number like 100)
-        test_size = (total_size * 10) // 100  # 10%
+        test_size = 0 # (total_size * 10) // 100  # 10%
         train_size = total_size - test_size
         
         # Create indices for test split

@@ -16,7 +16,7 @@ PatchDPOTrainer()
 import torch
 import gc
 
-GRID_SEARCH_DIR = "/srv/nlprx-lab/share5/sbanerjee332/dpo-training"
+GRID_SEARCH_DIR = "/coc/pskynet5/sbanerjee332/dpo-training"
 
 class ProgressiveEvalCallback(TrainerCallback):
     def __init__(self, eval_steps, total_steps, total_eval_samples, output_dir):
@@ -82,9 +82,16 @@ def train_model_dpo(
         max_seq_length = model_load_config.max_seq_length,
         dtype = model_load_config.dtype,
         load_in_4bit = model_load_config.load_in_4bit,
+        attn_implementation = "sdpa",
     )
 
-    # dataset = apply_chat_template_pt(tokenizer, dataset)
+    dataset = apply_chat_template_pt(tokenizer, dataset, run_config.model_name)
+
+    print("=== SAMPLE DPO EXAMPLE AFTER TEMPLATING ===")
+    print("PROMPT:", dataset["train"][0]["prompt"])
+    print("CHOSEN:", dataset["train"][0]["chosen"])
+    print("REJECTED:", dataset["train"][0]["rejected"])
+    print("=== END SAMPLE ===")
 
     pprint.pprint(dataset["train"][0])
     pprint.pprint(dataset)
@@ -116,17 +123,17 @@ def train_model_dpo(
     gc.collect()
 
     total_steps = math.ceil(len(dataset["train"]) / (train_batch_size * gradient_accumulation_steps)) * training_args.num_train_epochs
-    eval_steps = [18, 35, 52, 70, 87, 104, 122, 139, 156, 174]
-    callback = ProgressiveEvalCallback(eval_steps=eval_steps, total_steps=total_steps, total_eval_samples=len(dataset["test"]), output_dir=run_config.output_dir)
+    # eval_steps = [2145, 4290, 6435, 8580, 10725, 12870, 15015, 17160, 19305, 21450] # [18, 35, 52, 70, 87, 104, 122, 139, 156, 174]
+    # callback = ProgressiveEvalCallback(eval_steps=eval_steps, total_steps=total_steps, total_eval_samples=len(dataset["test"]), output_dir=run_config.output_dir)
     trainer = DPOTrainer(
         model = model,
         ref_model = None,
-        tokenizer = chat_template_func(tokenizer),
+        tokenizer = chat_template_func(tokenizer, run_config.model_name),
         beta = training_args.beta,
         train_dataset = dataset["train"],
-        eval_dataset = dataset["test"],
+        # eval_dataset = dataset["test"],
         max_length = model_load_config.max_seq_length,
-        callbacks = [callback],        
+        # callbacks = [callback],        
         args = DPOConfig(
             per_device_train_batch_size = train_batch_size,
             gradient_accumulation_steps = gradient_accumulation_steps,
@@ -145,8 +152,8 @@ def train_model_dpo(
             logging_steps = training_args.logging_steps,
 
             output_dir = run_config.output_dir,
-            # save_strategy="steps",
-            # save_steps=19,  # $100 per human checkpoint
+            save_strategy = "steps",
+            save_steps = 1000,
             # load_best_model_at_end=True,
             # metric_for_best_model="eval_loss",
 
@@ -155,7 +162,7 @@ def train_model_dpo(
             seed = 42,
         )
     )
-    callback.trainer = trainer
+    # callback.trainer = trainer
 
     trainer_stats = trainer.train()
 
