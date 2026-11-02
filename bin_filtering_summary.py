@@ -238,6 +238,7 @@ for bin_id in sorted(reddit_probs.keys()):
 
 
 # ── Step 7: plot histograms ────────────────────────────────────────────────────
+plt.rcParams["pdf.fonttype"] = 42
 all_lengths = []
 with open(OUTPUT_FILE, 'r') as f:
     for line in f:
@@ -254,7 +255,7 @@ plt.ylabel('Number of Posts')
 plt.title(f'Histogram of Post Token Lengths\n{OUTPUT_FILE}')
 plt.grid(True, linestyle='--', alpha=0.7)
 plt.tight_layout()
-plt.savefig("histogram_finalposts.png")
+plt.savefig("histogram_finalposts.pdf")
 plt.close()
 
 print("\nDone.")

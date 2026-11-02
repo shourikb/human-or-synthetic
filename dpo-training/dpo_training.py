@@ -16,7 +16,7 @@ PatchDPOTrainer()
 import torch
 import gc
 
-GRID_SEARCH_DIR = "/coc/pskynet5/sbanerjee332/dpo-training"
+GRID_SEARCH_DIR = "/coc/pskynet6/sbanerjee332/dpo-training"
 
 class ProgressiveEvalCallback(TrainerCallback):
     def __init__(self, eval_steps, total_steps, total_eval_samples, output_dir):

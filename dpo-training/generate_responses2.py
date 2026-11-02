@@ -75,7 +75,7 @@ def generate_outputs(model_path, model_name, conversations, batch_size, tp=1):
         repetition_penalty=1.1,
         top_p=0.9,
         top_k=50,
-        seed=42,
+        seed=55,
         stop=["<|eot_id|>", "<|end_of_text|>", "<|im_end|>", "<|endoftext|>"],
     )
 
@@ -115,7 +115,7 @@ def main():
     responses = generate_outputs(args.model, args.model_name, conversations, args.batch_size)
 
     model_name = args.model.replace("/", "_")
-    output_file = f"seed-42-s-555/responses_{model_name}.jsonl"
+    output_file = f"seed-55-h-555/responses_{model_name}.jsonl"
 
     with open(output_file, "w") as f:
         for conv, response in zip(conversations, responses):

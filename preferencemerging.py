@@ -3,7 +3,7 @@ import os
 import glob
 import argparse
 
-BASE_DIR = '/coc/pskynet5/sbanerjee332'
+BASE_DIR = '/coc/pskynet6/sbanerjee332'
 NUM_SAMPLES = 110448
 VOTES = 32
 DATASET = "summarization"

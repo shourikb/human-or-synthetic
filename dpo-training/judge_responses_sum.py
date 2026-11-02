@@ -1,17 +1,20 @@
 """
 Usage:
-    python judge_responses_sum.py \
+    python judge_responses_sum_gptoss.py \
         --judge_model openai/gpt-oss-20b \
         --trained_file trained_summaries.jsonl \
         --base_file base_summaries.jsonl \
+        --dataset_type synthetic \
         --batch_size 64 \
-        --output_file judge_results2.json
+        --output_file judge_results_sum.jsonl
 """
 
 import argparse
 import json
 import random
 import re
+from pathlib import Path
+
 from tqdm import tqdm
 from vllm import LLM, SamplingParams
 
@@ -20,6 +23,9 @@ MAX_OUTPUT_TOKENS = 4096
 # Leave a little headroom below the hard cap for chat-template overhead
 # (role tags, special tokens) that isn't captured by raw tokenizer.encode.
 PROMPT_TOKEN_BUDGET = MAX_MODEL_LEN - MAX_OUTPUT_TOKENS - 64
+TENSOR_PARALLEL_SIZE = 1
+JUDGE_TAG = "gptoss"  # used in raw-output filename so it doesn't collide with Qwen
+MODEL_NAMES = ("model_1", "model_2")
 
 
 def parse_args():
@@ -29,7 +35,7 @@ def parse_args():
     parser.add_argument("--base_file", type=str, required=True, help="JSONL file of base model summaries")
     parser.add_argument("--dataset_type", type=str, required=True, help="Either synthetic or human")
     parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--output_file", type=str, default="judge_results2.json")
+    parser.add_argument("--output_file", type=str, default="judge_results_sum.jsonl")
     return parser.parse_args()
 
 
@@ -83,16 +89,20 @@ def _format_violation_of(value):
     return None  # unknown — old flat schema carried no such field
 
 
-def extract_verdict(text):
-    """Returns (verdict, format_violation_model1, format_violation_model2).
-    verdict is 'A', 'B', or 'Invalid'. format_violation_* are True/False when
-    the judge reported them, or None when they couldn't be recovered."""
-    text = text.strip()
+def _name_as_rank(value):
+    """Some judges fill the rank slot with a model name instead of a number,
+    e.g. "model_1": "model_2" or "model_1": {"rank": "model_2", ...}, meaning
+    rank 1 = model_2. Returns that model name, or None if not this format."""
+    if isinstance(value, dict):
+        value = value.get("rank")
+    if isinstance(value, str) and value.strip() in MODEL_NAMES:
+        return value.strip()
+    return None
 
-    # Find the last top-level {...} block. The old regex (r'\{[^{}]*\}')
-    # only matched flat, non-nested objects, so it could never match the
-    # current schema where model_1/model_2 are themselves objects. Walk the
-    # string to find balanced top-level braces instead.
+
+def _top_level_json_blocks(text):
+    """Balanced top-level {...} blocks, so nested model_1/model_2 objects
+    are captured whole (a flat r'\\{[^{}]*\\}' regex can't match them)."""
     candidates = []
     depth = 0
     start = None
@@ -106,22 +116,35 @@ def extract_verdict(text):
                 depth -= 1
                 if depth == 0 and start is not None:
                     candidates.append(text[start:i + 1])
+    return candidates
 
-    for json_str in reversed(candidates):
+
+def extract_verdict(text):
+    """Returns (verdict, format_violation_model1, format_violation_model2).
+    verdict is 'A', 'B', or 'Invalid'. format_violation_* are True/False when
+    the judge reported them, or None when they couldn't be recovered."""
+    text = text.strip()
+
+    for json_str in reversed(_top_level_json_blocks(text)):
         try:
             data = json.loads(json_str)
         except Exception:
             continue
         if not (isinstance(data, dict) and "model_1" in data and "model_2" in data):
             continue
+
+        fv1 = _format_violation_of(data["model_1"])
+        fv2 = _format_violation_of(data["model_2"])
+
+        named = _name_as_rank(data["model_1"])
+        if named is not None:
+            return ("A" if named == "model_1" else "B"), fv1, fv2
+
         try:
             m1_rank = _rank_of(data["model_1"])
             m2_rank = _rank_of(data["model_2"])
         except Exception:
             continue
-
-        fv1 = _format_violation_of(data["model_1"])
-        fv2 = _format_violation_of(data["model_2"])
 
         if m1_rank == 1:
             return "A", fv1, fv2
@@ -136,6 +159,11 @@ def extract_verdict(text):
     for match in reversed(matches):
         if match.group(2) == "1":
             return ("A" if match.group(1) == "model_1" else "B"), None, None
+
+    # Fallback for the name-as-rank format when the JSON didn't parse
+    match = re.search(r'"model_1"\s*:\s*(?:\{\s*"rank"\s*:\s*)?"(model_[12])"', text)
+    if match:
+        return ("A" if match.group(1) == "model_1" else "B"), None, None
 
     return "Invalid", None, None
 
@@ -194,7 +222,7 @@ Please provide the ranking that the majority of careful, informed readers would 
     ]
 
 
-def judge_responses(judge_model, trained_data, base_data, batch_size, dataset_type):
+def judge_responses(judge_model, trained_data, base_data, batch_size, dataset_type, trained_file):
     # Validate that the two files are aligned
     if len(trained_data) != len(base_data):
         raise ValueError(
@@ -205,8 +233,17 @@ def judge_responses(judge_model, trained_data, base_data, batch_size, dataset_ty
         if t["post_prompt"] != b["post_prompt"]:
             raise ValueError(f"Post mismatch at row {i}. Ensure both files were generated from the same input.")
 
-    print(f"\nLoading judge model: {judge_model} (TP=1)")
-    judge_llm = LLM(model=judge_model, tensor_parallel_size=1, max_model_len=MAX_MODEL_LEN)
+    # Draw all A/B positions up front from a dedicated RNG, BEFORE vLLM is
+    # loaded, so the gpt-oss and Qwen runs use identical positions per row.
+    rng = random.Random(42)
+    positions = ["A" if rng.random() < 0.5 else "B" for _ in range(len(trained_data))]
+
+    print(f"\nLoading judge model: {judge_model} (TP={TENSOR_PARALLEL_SIZE})")
+    judge_llm = LLM(
+        model=judge_model,
+        tensor_parallel_size=TENSOR_PARALLEL_SIZE,
+        max_model_len=MAX_MODEL_LEN,
+    )
     tokenizer = judge_llm.get_tokenizer()
 
     judge_sampling = SamplingParams(
@@ -226,35 +263,31 @@ def judge_responses(judge_model, trained_data, base_data, batch_size, dataset_ty
         batch_trained = trained_data[start : start + batch_size]
         batch_base = base_data[start : start + batch_size]
 
-        # Build every judge input for this batch, but split into ones that
-        # fit the model's context window and ones that don't. Oversized
-        # ones never get sent to llm.chat — one oversized prompt would
-        # otherwise crash tokenization for the whole batch.
+        # Split into prompts that fit the context window and ones that don't.
+        # Oversized ones never get sent to llm.chat — one oversized prompt
+        # would otherwise crash tokenization for the whole batch.
         fit_inputs = []
-        fit_meta = []       # (trained_item, base_item, trained_position, post_prompt)
-        oversized_meta = [] # same tuple, for items we skip generation on
+        fit_meta = []       # (idx, trained_item, base_item, trained_position, post_prompt)
+        oversized_meta = []
 
-        for t, b in zip(batch_trained, batch_base):
+        for j, (t, b) in enumerate(zip(batch_trained, batch_base)):
+            idx = start + j
             post_prompt = t["post_prompt"]
             t_summary = t["summary"]
             b_summary = b["summary"]
 
-            if random.random() < 0.5:
+            trained_is = positions[idx]
+            if trained_is == "A":
                 summary_a, summary_b = t_summary, b_summary
-                trained_is = "A"
             else:
                 summary_a, summary_b = b_summary, t_summary
-                trained_is = "B"
 
             messages = build_judge_input(post_prompt, summary_a, summary_b)
 
-            # Measure the actual templated prompt length the same way
-            # vLLM will tokenize it, so this check matches what would
-            # otherwise raise VLLMValidationError.
             token_ids = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
             n_tokens = len(token_ids)
 
-            meta = (t, b, trained_is, post_prompt)
+            meta = (idx, t, b, trained_is, post_prompt)
             if n_tokens > PROMPT_TOKEN_BUDGET:
                 oversized_meta.append(meta)
             else:
@@ -262,10 +295,11 @@ def judge_responses(judge_model, trained_data, base_data, batch_size, dataset_ty
                 fit_meta.append(meta)
 
         # Record oversized items as an automatic loss without calling the model.
-        for t, b, trained_is, post_prompt in oversized_meta:
+        for idx, t, b, trained_is, post_prompt in oversized_meta:
             oversized_count += 1
             total += 1
             all_results.append({
+                "idx": idx,
                 "post_prompt": post_prompt,
                 "trained_summary": t["summary"],
                 "base_summary": b["summary"],
@@ -286,27 +320,27 @@ def judge_responses(judge_model, trained_data, base_data, batch_size, dataset_ty
         batch_outputs = judge_llm.chat(fit_inputs, sampling_params=judge_sampling)
 
         for i, output in enumerate(batch_outputs):
-            t, b, trained_is, post_prompt = fit_meta[i]
+            idx, t, b, trained_is, post_prompt = fit_meta[i]
             response_text = output.outputs[0].text
             verdict, fv1, fv2 = extract_verdict(response_text)
             won = verdict == trained_is
             if verdict == "Invalid":
                 invalid_count += 1
-                print("Invalid response")
+                print(f"Invalid response at idx {idx}")
 
             if won:
                 trained_wins += 1
             total += 1
 
             # fv1/fv2 correspond to model_1/model_2 in the judge prompt, not
-            # to trained/base — remap using trained_is so the output records
-            # are labeled the way the rest of this file already is.
+            # to trained/base — remap using trained_is.
             if trained_is == "A":
                 trained_fv, base_fv = fv1, fv2
             else:
                 trained_fv, base_fv = fv2, fv1
 
             all_results.append({
+                "idx": idx,
                 "post_prompt": post_prompt,
                 "trained_summary": t["summary"],
                 "base_summary": b["summary"],
@@ -321,16 +355,20 @@ def judge_responses(judge_model, trained_data, base_data, batch_size, dataset_ty
     print(f"\nTotal oversized prompts skipped (counted as losses): {oversized_count}")
     print(f"Total invalid (unparseable) judge responses: {invalid_count}")
 
-    with open(f"raw_outputs2_{dataset_type}_sum.jsonl", "a") as f:
+    # Restore input order so row i lines up with the Qwen file's row i
+    all_results.sort(key=lambda r: r["idx"])
+
+    out_path = f"raw_outputs_{JUDGE_TAG}_{dataset_type}_{Path(trained_file).stem}_sum.jsonl"
+    with open(out_path, "w") as f:
         for r in all_results:
             f.write(json.dumps(r) + "\n")
+    print(f"Wrote raw outputs to {out_path}")
 
     return trained_wins, total
 
 
 def main():
     args = parse_args()
-    random.seed(42)
 
     trained_data = load_generation_file(args.trained_file)
     base_data = load_generation_file(args.base_file)
@@ -343,6 +381,7 @@ def main():
         base_data,
         args.batch_size,
         args.dataset_type,
+        args.trained_file,
     )
 
     final_win_rate = trained_wins / total if total else 0
@@ -353,17 +392,15 @@ def main():
     print(f"Final win rate:     {final_win_rate:.4f}")
     print("==============================")
 
+    # One JSON object per line so repeated runs stay parseable
     with open(args.output_file, "a") as f:
-        json.dump(
-            {
-                "trained_model": args.trained_file,
-                "trained_wins": trained_wins,
-                "total": total,
-                "win_rate": final_win_rate,
-            },
-            f,
-            indent=2,
-        )
+        f.write(json.dumps({
+            "judge_model": args.judge_model,
+            "trained_model": args.trained_file,
+            "trained_wins": trained_wins,
+            "total": total,
+            "win_rate": final_win_rate,
+        }) + "\n")
 
 
 if __name__ == "__main__":

@@ -4,14 +4,17 @@ Usage:
         --judge_model openai/gpt-oss-20b \
         --trained_file trained_responses.jsonl \
         --base_file base_responses.jsonl \
+        --dataset_type synthetic \
         --batch_size 64 \
-        --output_file judge_results.json
+        --output_file judge_results.jsonl
 """
 
 import argparse
 import json
 import random
 import re
+from pathlib import Path
+
 from tqdm import tqdm
 from vllm import LLM, SamplingParams
 
@@ -20,6 +23,8 @@ MAX_OUTPUT_TOKENS = 4096
 # Leave a little headroom below the hard cap for chat-template overhead
 # (role tags, special tokens) that isn't captured by raw tokenizer.encode.
 PROMPT_TOKEN_BUDGET = MAX_MODEL_LEN - MAX_OUTPUT_TOKENS - 64
+TENSOR_PARALLEL_SIZE = 1
+JUDGE_TAG = "gptoss"  # used in raw-output filename so it doesn't collide with Qwen
 
 
 def parse_args():
@@ -29,21 +34,24 @@ def parse_args():
     parser.add_argument("--base_file", type=str, required=True, help="JSONL file of base model responses")
     parser.add_argument("--dataset_type", type=str, required=True, help="Either synthetic or human")
     parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--output_file", type=str, default="judge_results.json")
+    parser.add_argument("--output_file", type=str, default="judge_results.jsonl")
     return parser.parse_args()
+
 
 def parse_chosen_field(chosen):
     marker = "Assistant:"
     idx = chosen.rfind(marker)
     if idx == -1:
-        raise ValueError(f"No 'Assistant:' found in chosen field")
+        raise ValueError("No 'Assistant:' found in chosen field")
     conversation = chosen[:idx + len(marker)]
     response = chosen[idx + len(marker):]
     return conversation, response
 
+
 def load_jsonl(path):
     with open(path, "r") as f:
         return [json.loads(l) for l in f]
+
 
 def load_base_file(path):
     raw = load_jsonl(path)
@@ -52,6 +60,7 @@ def load_base_file(path):
         conv, resp = parse_chosen_field(entry["chosen"])
         result.append({"conversation": conv, "response": resp})
     return result
+
 
 def extract_verdict(text):
     text = text.strip()
@@ -121,7 +130,7 @@ Please provide the ranking that the majority of humans would give.
     ]
 
 
-def judge_responses(judge_model, trained_data, base_data, batch_size, dataset_type):
+def judge_responses(judge_model, trained_data, base_data, batch_size, dataset_type, trained_file):
     # Validate that the two files are aligned
     if len(trained_data) != len(base_data):
         raise ValueError(
@@ -132,8 +141,17 @@ def judge_responses(judge_model, trained_data, base_data, batch_size, dataset_ty
         if t["conversation"] != b["conversation"]:
             raise ValueError(f"Conversation mismatch at row {i}. Ensure both files were generated from the same input.")
 
-    print(f"\nLoading judge model: {judge_model} (TP=1)")
-    judge_llm = LLM(model=judge_model, tensor_parallel_size=1, max_model_len=MAX_MODEL_LEN)
+    # Draw all A/B positions up front from a dedicated RNG, BEFORE vLLM is
+    # loaded, so the gpt-oss and Qwen runs use identical positions per row.
+    rng = random.Random(42)
+    positions = ["A" if rng.random() < 0.5 else "B" for _ in range(len(trained_data))]
+
+    print(f"\nLoading judge model: {judge_model} (TP={TENSOR_PARALLEL_SIZE})")
+    judge_llm = LLM(
+        model=judge_model,
+        tensor_parallel_size=TENSOR_PARALLEL_SIZE,
+        max_model_len=MAX_MODEL_LEN,
+    )
     tokenizer = judge_llm.get_tokenizer()
 
     judge_sampling = SamplingParams(
@@ -146,41 +164,38 @@ def judge_responses(judge_model, trained_data, base_data, batch_size, dataset_ty
     trained_wins = 0
     total = 0
     oversized_count = 0
+    invalid_count = 0
     all_results = []
 
     for start in tqdm(range(0, len(trained_data), batch_size)):
         batch_trained = trained_data[start : start + batch_size]
         batch_base = base_data[start : start + batch_size]
 
-        # Build every judge input for this batch, but split into ones that
-        # fit the model's context window and ones that don't. Oversized
-        # ones never get sent to llm.chat — one oversized prompt would
-        # otherwise crash tokenization for the whole batch.
+        # Split into prompts that fit the context window and ones that don't.
+        # Oversized ones never get sent to llm.chat — one oversized prompt
+        # would otherwise crash tokenization for the whole batch.
         fit_inputs = []
-        fit_meta = []       # (trained_response, base_response, trained_position, conversation)
-        oversized_meta = [] # same tuple, for items we skip generation on
+        fit_meta = []       # (idx, trained, base, trained_position, conversation)
+        oversized_meta = []
 
-        for t, b in zip(batch_trained, batch_base):
+        for j, (t, b) in enumerate(zip(batch_trained, batch_base)):
+            idx = start + j
             conv = t["conversation"]
             t_out = t["response"]
             b_out = b["response"]
 
-            if random.random() < 0.5:
+            trained_is = positions[idx]
+            if trained_is == "A":
                 response_a, response_b = t_out, b_out
-                trained_is = "A"
             else:
                 response_a, response_b = b_out, t_out
-                trained_is = "B"
 
             messages = build_judge_input(conv, response_a, response_b)
 
-            # Measure the actual templated prompt length the same way
-            # vLLM will tokenize it, so this check matches what would
-            # otherwise raise VLLMValidationError.
             token_ids = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
             n_tokens = len(token_ids)
 
-            meta = (t, b, trained_is, conv)
+            meta = (idx, t, b, trained_is, conv)
             if n_tokens > PROMPT_TOKEN_BUDGET:
                 oversized_meta.append(meta)
             else:
@@ -188,10 +203,11 @@ def judge_responses(judge_model, trained_data, base_data, batch_size, dataset_ty
                 fit_meta.append(meta)
 
         # Record oversized items as an automatic loss without calling the model.
-        for t, b, trained_is, conv in oversized_meta:
+        for idx, t, b, trained_is, conv in oversized_meta:
             oversized_count += 1
             total += 1
             all_results.append({
+                "idx": idx,
                 "conversation": conv,
                 "trained_response": t["response"],
                 "base_response": b["response"],
@@ -210,38 +226,46 @@ def judge_responses(judge_model, trained_data, base_data, batch_size, dataset_ty
         batch_outputs = judge_llm.chat(fit_inputs, sampling_params=judge_sampling)
 
         for i, output in enumerate(batch_outputs):
-            t, b, trained_is, conv = fit_meta[i]
-            verdict = extract_verdict(output.outputs[0].text)
+            idx, t, b, trained_is, conv = fit_meta[i]
+            raw = output.outputs[0].text
+            verdict = extract_verdict(raw)
             won = verdict == trained_is
             if verdict == "Invalid":
-                print("Invalid response")
+                invalid_count += 1
+                print(f"Invalid response at idx {idx}")
 
             if won:
                 trained_wins += 1
             total += 1
 
             all_results.append({
+                "idx": idx,
                 "conversation": conv,
                 "trained_response": t["response"],
                 "base_response": b["response"],
                 "verdict": verdict,
                 "trained_position": trained_is,
                 "trained_won": won,
-                "raw_judge_response": output.outputs[0].text,
+                "raw_judge_response": raw,
             })
 
     print(f"\nTotal oversized prompts skipped (counted as losses): {oversized_count}")
+    print(f"Total invalid judge responses: {invalid_count}")
 
-    with open(f"raw_outputs_{dataset_type}_help.jsonl", "w") as f:
+    # Restore input order so row i lines up with the Qwen file's row i
+    all_results.sort(key=lambda r: r["idx"])
+
+    out_path = f"raw_outputs_{JUDGE_TAG}_{dataset_type}_{Path(trained_file).stem}_help.jsonl"
+    with open(out_path, "w") as f:
         for r in all_results:
             f.write(json.dumps(r) + "\n")
+    print(f"Wrote raw outputs to {out_path}")
 
     return trained_wins, total
 
 
 def main():
     args = parse_args()
-    random.seed(42)
 
     trained_data = load_jsonl(args.trained_file)
     base_data = load_base_file(args.base_file)
@@ -254,6 +278,7 @@ def main():
         base_data,
         args.batch_size,
         args.dataset_type,
+        args.trained_file,
     )
 
     final_win_rate = trained_wins / total if total else 0
@@ -264,17 +289,15 @@ def main():
     print(f"Final win rate:     {final_win_rate:.4f}")
     print("==============================")
 
+    # One JSON object per line so repeated runs stay parseable
     with open(args.output_file, "a") as f:
-        json.dump(
-            {
-                "trained_model": args.trained_file,
-                "trained_wins": trained_wins,
-                "total": total,
-                "win_rate": final_win_rate,
-            },
-            f,
-            indent=2,
-        )
+        f.write(json.dumps({
+            "judge_model": args.judge_model,
+            "trained_model": args.trained_file,
+            "trained_wins": trained_wins,
+            "total": total,
+            "win_rate": final_win_rate,
+        }) + "\n")
 
 
 if __name__ == "__main__":
