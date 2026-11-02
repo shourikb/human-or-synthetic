@@ -4,7 +4,7 @@ import re
 def parse_conversation(text):
     messages = []
     # Split on Human:/Assistant: turns
-    turns = re.split(r'\n\n(Human|AI Assistant|Assistant): ', text.strip())
+    turns = re.split(r'\s+(Human|AI Assistant|Assistant):\s*', text.strip())
     # turns[0] is empty, then alternates role/content
     if turns[0] and not turns[0] == '':
         # Parse the leftover first turn manually
@@ -18,7 +18,7 @@ def parse_conversation(text):
         messages.append({"role": role, "content": content})
     return messages
 
-with open("pt-reddit.jsonl") as fin, open("sft-reddit.jsonl", "w") as fout:
+with open("pt-synsum.jsonl") as fin, open("sft-synsum.jsonl", "w") as fout:
     for line in fin:
         example = json.loads(line)
         messages = parse_conversation(example["chosen"])

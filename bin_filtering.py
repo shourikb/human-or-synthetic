@@ -237,6 +237,7 @@ for bin_id in sorted(anthropic_probs.keys()):
 
 
 # ── Step 7: plot histograms ───────────────────────────────────────────────────
+plt.rcParams["pdf.fonttype"] = 42
 all_lengths = []
 with open(OUTPUT_FILE, 'r') as f:
     for line in f:
@@ -253,7 +254,7 @@ plt.ylabel('Number of Conversations')
 plt.title(f'Histogram of Conversation Token Lengths\n{OUTPUT_FILE}')
 plt.grid(True, linestyle='--', alpha=0.7)
 plt.tight_layout()
-plt.savefig("histogram_finalconvos2.png")
+plt.savefig("histogram_finalconvos2.pdf")
 plt.close()
 
 print("\nDone.")

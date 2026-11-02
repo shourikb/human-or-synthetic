@@ -10,7 +10,7 @@ import sys
 import tempfile
 import shutil
 
-BASE_DIR = '/coc/pskynet5/sbanerjee332'
+BASE_DIR = '/coc/pskynet6/sbanerjee332'
 file1_path = os.path.join(BASE_DIR, 'anthropic_subset.jsonl')
 file2_path = os.path.join(BASE_DIR, 'finalconvos3.jsonl')
 file3_path = os.path.join(BASE_DIR, 'dpo-training/evalresults.jsonl')

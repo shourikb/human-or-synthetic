@@ -37,7 +37,7 @@ def get_train_dataset(run_config: Union[PTRunConfig, SFTRunConfig]) -> DatasetDi
     full_dataset = load_dataset('json', data_files=full_dataset_path) # load_from_disk(full_dataset_path) 
     print(f"Full dataset: {full_dataset}")
 
-    sampled_dataset = get_random_train_subset(full_dataset, train_size, 123)
+    sampled_dataset = get_random_train_subset(full_dataset, train_size, 555)
     print(f"Sampled dataset: {sampled_dataset}")
     print(f"Example row: {sampled_dataset['train'][0]}")
 
