@@ -1,28 +1,38 @@
-# Ignore everything by default
+# Deny everything by default; this directory also holds data, models and job logs
 *
-
-# Un-ignore directories so git will look inside them
 !*/
 
-# Un-ignore the file types you actually want tracked
+# Code and config
 !*.py
+!*.sh
+!*.conf
 !*.yaml
 !*.yml
-!*.sh
+!.gitignore
+!README.md
+!requirements.txt
+!environment.yml
+!assets/**
 
-# Explicitly re-ignore the risky extensions even inside otherwise-allowed dirs
-# (belt-and-suspenders on top of the deny-all above)
+# Data, outputs and caches
 *.jsonl
+*.json
+*.csv
+*.txt
 *.out
 *.err
-*.txt
+*.pyc
+__pycache__/
+Miniconda3-*.sh
 huggingface/
 wandb/
 unsloth_compiled_cache/
-models/
+_unsloth_sentencepiece_temp/
+tokenizer_tmp/
 models*/
+outputs/
+seed-*/
+old_responses/
 
-# A few common repo files worth keeping
-!.gitignore
-!README.md
+# requirements.txt is re-allowed after *.txt
 !requirements.txt
