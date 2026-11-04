@@ -1,7 +1,8 @@
+import argparse
 import json
 from collections import defaultdict
 
-MAX_PAIRS_PER_POST = 5  # SHP README recommendation, to avoid over-fitting to a few viral posts
+MAX_PAIRS_PER_POST = 5
 
 
 def convert(input_path, output_path, max_pairs_per_post=MAX_PAIRS_PER_POST):
@@ -10,7 +11,6 @@ def convert(input_path, output_path, max_pairs_per_post=MAX_PAIRS_PER_POST):
     skipped_bad_label = 0
     skipped_cap = 0
 
-    # First pass: filter + build (post_id -> list of candidate pairs), sorted by score_ratio
     pairs_by_post = defaultdict(list)
 
     with open(input_path) as fin:
@@ -19,7 +19,6 @@ def convert(input_path, output_path, max_pairs_per_post=MAX_PAIRS_PER_POST):
 
             score_ratio = row.get("score_ratio", 0)
 
-            # Drop weak preference pairs, analogous to helpsteer2 strength==0
             if score_ratio < 2.0:
                 skipped_weak += 1
                 continue
@@ -31,7 +30,6 @@ def convert(input_path, output_path, max_pairs_per_post=MAX_PAIRS_PER_POST):
             prompt = row["history"]
             post_id = row["post_id"]
 
-            # labels == 1 means A is preferred, labels == 0 means B is preferred
             if label == 1:
                 chosen_resp, rejected_resp = ref_a, ref_b
             elif label == 0:
@@ -45,10 +43,9 @@ def convert(input_path, output_path, max_pairs_per_post=MAX_PAIRS_PER_POST):
 
             pairs_by_post[post_id].append((score_ratio, chosen, rejected))
 
-    # Second pass: cap pairs per post, keeping the highest-score_ratio (strongest signal) ones
     with open(output_path, "w") as fout:
         for post_id, pairs in pairs_by_post.items():
-            pairs.sort(key=lambda p: p[0], reverse=True)  # strongest preference first
+            pairs.sort(key=lambda p: p[0], reverse=True)
 
             kept = pairs[:max_pairs_per_post]
             skipped_cap += len(pairs) - len(kept)
@@ -66,5 +63,14 @@ def convert(input_path, output_path, max_pairs_per_post=MAX_PAIRS_PER_POST):
     )
 
 
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input_file", type=str, required=True, help="SHP train split as JSONL")
+    parser.add_argument("--output_file", type=str, required=True, help="e.g. pt-shp.jsonl")
+    parser.add_argument("--max_pairs_per_post", type=int, default=MAX_PAIRS_PER_POST)
+    args = parser.parse_args()
+    convert(args.input_file, args.output_file, args.max_pairs_per_post)
+
+
 if __name__ == "__main__":
-    convert("shp.jsonl", "pt-shp.jsonl")
+    main()

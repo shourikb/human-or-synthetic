@@ -1,30 +1,14 @@
-"""
-Usage:
-    python judge_responses_qwen.py \
-        --judge_model Qwen/Qwen3.8-27B \
-        --trained_file trained_responses.jsonl \
-        --base_file base_responses.jsonl \
-        --dataset_type synthetic \
-        --batch_size 64 \
-        --output_file judge_results.jsonl
-        # add --enable_thinking to let Qwen reason before answering
-"""
-
 import argparse
 import json
 import random
 import re
-from pathlib import Path
 
 from tqdm import tqdm
 from vllm import LLM, SamplingParams
 
 MAX_MODEL_LEN = 8192
 MAX_OUTPUT_TOKENS = 4096
-# Leave a little headroom below the hard cap for chat-template overhead
 PROMPT_TOKEN_BUDGET = MAX_MODEL_LEN - MAX_OUTPUT_TOKENS - 64
-TENSOR_PARALLEL_SIZE = 2
-JUDGE_TAG = "qwen"  # used in raw-output filename so it doesn't collide with gpt-oss
 
 
 def parse_args():
@@ -32,9 +16,12 @@ def parse_args():
     parser.add_argument("--judge_model", type=str, default="Qwen/Qwen3.8-27B")
     parser.add_argument("--trained_file", type=str, required=True, help="JSONL file of trained model responses")
     parser.add_argument("--base_file", type=str, required=True, help="JSONL file of base model responses")
-    parser.add_argument("--dataset_type", type=str, required=True, help="Either synthetic or human")
     parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--output_file", type=str, default="judge_results.jsonl")
+    parser.add_argument("--output_file", type=str, required=True,
+                        help="JSONL file the win-rate summary line is appended to")
+    parser.add_argument("--raw_output_file", type=str, required=True,
+                        help="JSONL file for the per-example judge outputs")
+    parser.add_argument("--tensor_parallel_size", type=int, default=2)
     parser.add_argument("--enable_thinking", action="store_true",
                         help="Enable Qwen3 thinking mode (risk: truncation before JSON at 4096 output tokens)")
     return parser.parse_args()
@@ -65,7 +52,6 @@ def load_base_file(path):
 
 
 def strip_thinking(text):
-    # Remove complete <think>...</think> blocks, and anything before a dangling </think>
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
     if "</think>" in text:
         text = text.split("</think>")[-1]
@@ -81,9 +67,6 @@ def extract_verdict(text):
         try:
             data = json.loads(json_str)
             if isinstance(data, dict) and "model_1" in data and "model_2" in data:
-                # Qwen sometimes fills the rank slots with model names instead
-                # of numbers: {"model_1": "model_2", "model_2": "model_1"}
-                # means rank 1 = model_2. Handle that before int() fails.
                 if data["model_1"] in ("model_1", "model_2"):
                     return "A" if data["model_1"] == "model_1" else "B"
                 m1 = int(data["model_1"])
@@ -95,13 +78,11 @@ def extract_verdict(text):
         except Exception:
             pass
 
-    # Fallback: last (not first) rank-1 assignment via regex
     matches = list(re.finditer(r'"(model_[12])"\s*:\s*(\d+)', text))
     for match in reversed(matches):
         if match.group(2) == "1":
             return "A" if match.group(1) == "model_1" else "B"
 
-    # Fallback for the name-as-rank format when the JSON didn't parse
     match = re.search(r'"model_1"\s*:\s*"(model_[12])"', text)
     if match:
         return "A" if match.group(1) == "model_1" else "B"
@@ -150,8 +131,7 @@ Please provide the ranking that the majority of humans would give.
     ]
 
 
-def judge_responses(judge_model, trained_data, base_data, batch_size, dataset_type, trained_file, enable_thinking):
-    # Validate that the two files are aligned
+def judge_responses(judge_model, trained_data, base_data, batch_size, tensor_parallel_size, raw_output_file, enable_thinking):
     if len(trained_data) != len(base_data):
         raise ValueError(
             f"Mismatched lengths: trained_file has {len(trained_data)} rows, "
@@ -161,21 +141,18 @@ def judge_responses(judge_model, trained_data, base_data, batch_size, dataset_ty
         if t["conversation"] != b["conversation"]:
             raise ValueError(f"Conversation mismatch at row {i}. Ensure both files were generated from the same input.")
 
-    # Draw all A/B positions up front from a dedicated RNG, BEFORE vLLM is
-    # loaded, so the gpt-oss and Qwen runs use identical positions per row.
     rng = random.Random(42)
     positions = ["A" if rng.random() < 0.5 else "B" for _ in range(len(trained_data))]
 
-    print(f"\nLoading judge model: {judge_model} (TP={TENSOR_PARALLEL_SIZE})")
+    print(f"\nLoading judge model: {judge_model} (TP={tensor_parallel_size})")
     judge_llm = LLM(
         model=judge_model,
-        tensor_parallel_size=TENSOR_PARALLEL_SIZE,
+        tensor_parallel_size=tensor_parallel_size,
         max_model_len=MAX_MODEL_LEN,
     )
     tokenizer = judge_llm.get_tokenizer()
     chat_kwargs = {"enable_thinking": enable_thinking}
 
-    # Qwen3 recommended sampling: thinking -> T=0.6, top_p=0.95; non-thinking -> T=0.7, top_p=0.8
     judge_sampling = SamplingParams(
         n=1,
         min_tokens=10,
@@ -196,7 +173,7 @@ def judge_responses(judge_model, trained_data, base_data, batch_size, dataset_ty
         batch_base = base_data[start : start + batch_size]
 
         fit_inputs = []
-        fit_meta = []       # (idx, trained, base, trained_position, conversation)
+        fit_meta = []
         oversized_meta = []
 
         for j, (t, b) in enumerate(zip(batch_trained, batch_base)):
@@ -276,14 +253,12 @@ def judge_responses(judge_model, trained_data, base_data, batch_size, dataset_ty
     print(f"\nTotal oversized prompts skipped (counted as losses): {oversized_count}")
     print(f"Total invalid judge responses: {invalid_count}")
 
-    # Restore input order so row i lines up with the gpt-oss file's row i
     all_results.sort(key=lambda r: r["idx"])
 
-    out_path = f"raw_outputs_{JUDGE_TAG}_{dataset_type}_{Path(trained_file).stem}_help.jsonl"
-    with open(out_path, "w") as f:
+    with open(raw_output_file, "w") as f:
         for r in all_results:
             f.write(json.dumps(r) + "\n")
-    print(f"Wrote raw outputs to {out_path}")
+    print(f"Wrote raw outputs to {raw_output_file}")
 
     return trained_wins, total
 
@@ -301,8 +276,8 @@ def main():
         trained_data,
         base_data,
         args.batch_size,
-        args.dataset_type,
-        args.trained_file,
+        args.tensor_parallel_size,
+        args.raw_output_file,
         args.enable_thinking,
     )
 
@@ -314,7 +289,6 @@ def main():
     print(f"Final win rate:     {final_win_rate:.4f}")
     print("==============================")
 
-    # One JSON object per line so repeated runs stay parseable
     with open(args.output_file, "a") as f:
         f.write(json.dumps({
             "judge_model": args.judge_model,

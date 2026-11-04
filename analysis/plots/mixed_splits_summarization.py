@@ -1,27 +1,10 @@
-"""
-Mixed-run Summarization plot -- 3 models side by side.
+import argparse
 
-X-axis: discrete human/synthetic splits (e.g. 95/5, 96/4, ..., 99/1).
-Y-axis: win rate for that mixed configuration, given as 2 runs per split
-        (plotted as mean, with min/max shown as an error bar).
-
-Each subplot also draws 3 horizontal dotted reference lines:
-  - best 100% human win rate     (2 values, averaged)
-  - best 100% synthetic win rate (2 values, averaged)
-  - base (untrained) win rate    (2 values, averaged)
-
-Edit the MODELS list below, then run:
-    python mixed_summarization.py
-"""
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 
-# ── Paper style ──────────────────────────────────────────────────────────────
-# Figures are drawn at the exact size they are printed in the ACL template, so
-# the font sizes below are the real printed sizes. Include the saved PNG in
-# LaTeX at width=\textwidth (no extra scaling).
-TEXT_WIDTH = 6.30   # inches, ACL \textwidth (figure*)
+TEXT_WIDTH = 6.30
 
 plt.rcParams.update({
     "font.family": "sans-serif",
@@ -38,16 +21,14 @@ plt.rcParams.update({
     "savefig.dpi": 300, "savefig.bbox": "tight", "savefig.pad_inches": 0.02,
 })
 
-# One color per data source, shared by every figure in the paper.
-C_HUMAN = "#B0205E"      # HelpSteer3 / TL;DR
-C_SHP = "#5B6FB5"        # SHP
-C_SYNTH = "#E08A2C"      # Synthetic
+C_HUMAN = "#B0205E"
+C_SHP = "#5B6FB5"
+C_SYNTH = "#E08A2C"
 C_MIXED = "#2B2B2B"
 C_BASE = "#8A8A8A"
 
 
 def dollar_log_axis(ax, ticks=(100, 1000, 10000)):
-    """Log x-axis labelled $100, $1k, $10k instead of 10^2, 10^3, 10^4."""
     ax.set_xscale("log")
     ax.set_xticks(list(ticks))
     ax.xaxis.set_minor_formatter(mticker.NullFormatter())
@@ -59,26 +40,22 @@ def save(fig, png_path):
     fig.savefig(png_path)
     print(f"saved {png_path}")
 
-# ============================== EDIT THIS ==============================
 
 SPLIT_LABELS = ["95/5", "96/4", "97/3", "98/2", "99/1"]
 
-# One dict per model/panel. Add, remove, or reorder entries freely --
-# the figure adapts to however many are in this list.
 MODELS = [
     {
         "name": "Olmo3-7B",
-        # Win rate for each split above, 2 runs each (mean +/- min/max).
         "mixed_winrate_runs": np.array([
-            [36.62, 41.6],   # 95/5
-            [36.08, 40.53],   # 96/4
-            [39.01, 40.38],   # 97/3
-            [38.67, 41.5],   # 98/2
-            [36.38, 41.85],   # 99/1
+            [36.62, 41.6],
+            [36.08, 40.53],
+            [39.01, 40.38],
+            [38.67, 41.5],
+            [36.38, 41.85],
         ]) / 100,
-        "best_human_runs": np.array([31.34, 46.0]) / 100,       # best 100% human win rate
-        "best_synthetic_runs": np.array([64.6, 66.7]) / 100,   # best 100% synthetic win rate
-        "base_runs": np.array([3.66, 0.78]) / 100,             # untrained baseline
+        "best_human_runs": np.array([31.34, 46.0]) / 100,
+        "best_synthetic_runs": np.array([64.6, 66.7]) / 100,
+        "base_runs": np.array([3.66, 0.78]) / 100,
     },
     {
         "name": "Llama3.1-8B",
@@ -108,9 +85,6 @@ MODELS = [
     },
 ]
 
-OUTPUT_PATH = "mixed_summarization_by_split.png"
-
-# =========================================================================
 
 REF_STYLE = {
     "human":     dict(color=C_HUMAN, linestyle="--", label="Best 100% human"),
@@ -125,9 +99,11 @@ def _mean_min_max(vals):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", default="mixed_summarization_by_split.png", help="Where to save the figure")
+    args = parser.parse_args()
+
     n = len(MODELS)
-    # sharey=True: all panels share one y-range (computed from all models
-    # below) so the gaps between lines can be compared across models.
     fig, axes = plt.subplots(1, n, figsize=(TEXT_WIDTH, 1.95), sharey=True)
     if n == 1:
         axes = [axes]
@@ -178,7 +154,7 @@ def main():
                loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=4, columnspacing=1.4)
 
     fig.tight_layout(w_pad=0.8)
-    save(fig, OUTPUT_PATH)
+    save(fig, args.output)
 
     for model in MODELS:
         print(f"\n=== {model['name']} ===")
@@ -191,7 +167,6 @@ def main():
                            ("base", model["base_runs"])]:
             mean, lo, hi = _mean_min_max(vals)
             print(f"  {key}: {vals} -> mean={mean:.4f}")
-
 
 
 if __name__ == "__main__":

@@ -1,95 +1,67 @@
-import json
-from collections import Counter
-from nltk.util import ngrams
-import nltk
+import argparse
 import re
+from collections import Counter
 
-nltk.download('punkt')
+import nltk
+from nltk.util import ngrams
 
-def clean_tags_for_ngrams(text):
-    return re.sub(r"(Human:|AI Assistant:)", "", text)
+from generation.utils import read_jsonl, write_jsonl
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Drop conversations containing corpus-common or self-repeated 5-grams")
+    parser.add_argument("--reference_files", type=str, nargs="+", required=True,
+                        help="Files used to compute corpus-wide 5-gram frequencies")
+    parser.add_argument("--input_file", type=str, required=True)
+    parser.add_argument("--output_file", type=str, required=True)
+    parser.add_argument("--threshold_frac", type=float, default=0.05,
+                        help="A 5-gram is common if it appears more than this fraction of reference conversations")
+    parser.add_argument("--max_repeats", type=int, default=2,
+                        help="Drop a conversation if any 5-gram repeats more than this many times within it")
+    return parser.parse_args()
+
 
 def get_5grams(text):
-    cleaned = clean_tags_for_ngrams(text)
-    tokens = nltk.word_tokenize(cleaned.lower())
-    return list(ngrams(tokens, 5))
+    cleaned = re.sub(r"(Human:|AI Assistant:)", "", text)
+    return list(ngrams(nltk.word_tokenize(cleaned.lower()), 5))
 
-def convo_to_text(convo_str, response_str):
-    return convo_str + " " + response_str
 
-def is_exempt_5gram(gram):
-    # Join back for easier checking
+def entry_text(entry):
+    return entry.get("conversation", "") + " " + entry.get("response_A", "")
+
+
+def is_exempt(gram):
     joined = " ".join(gram)
-    if "human" in joined or "assistant" in joined:
-        return True
-    if joined == "i 'd be happy to help":
-        return True
-    return False
+    return "human" in joined or "assistant" in joined or joined == "i 'd be happy to help"
 
-REFERENCE_FILES = ["sample5.jsonl", "sample6.jsonl", "sample7.jsonl"]  # files to compute 5-gram frequencies from
-TARGET_FILE = "sample7.jsonl"  # file to filter
-OUTPUT_FILE = "filtered_sample7.jsonl"
-MAX_REPEATS_IN_CONVO = 2  # allow up to 2 repeats, filter if >2
-THRESHOLD_FRAC = 0.05  # Adjust this threshold as needed
 
-def repeated_5grams(text):
-    grams = get_5grams(text)
-    counts = Counter(grams)
-    return [gram for gram, c in counts.items() if c > MAX_REPEATS_IN_CONVO]
+def main():
+    args = parse_args()
+    nltk.download("punkt", quiet=True)
 
-all_5grams = []
-convos_data = []
+    freq = Counter()
+    num_reference = 0
+    for path in args.reference_files:
+        for entry in read_jsonl(path):
+            freq.update(get_5grams(entry_text(entry)))
+            num_reference += 1
 
-# Step 1: Read all conversations and extract all 5-grams
-for filepath in REFERENCE_FILES:
-    with open(filepath, "r", encoding="utf-8") as f:
-        for line in f:
-            entry = json.loads(line)
-            convo = entry.get("conversation", "")
-            response = entry.get("response_A", "")
-            convo_text = convo_to_text(convo, response)
-            convos_data.append((convo_text, entry))
-            all_5grams.extend(get_5grams(convo_text))
+    threshold = int(num_reference * args.threshold_frac)
+    print(f"5-gram frequency threshold: {threshold}")
+    common = {gram for gram, count in freq.items() if count > threshold and not is_exempt(gram)}
 
-# Step 2: Count frequencies of all 5-grams
-freq_5grams = Counter(all_5grams)
-threshold = int(len(convos_data) * THRESHOLD_FRAC)
-print("5-gram frequency threshold for filtering: ", threshold)
+    entries = read_jsonl(args.input_file)
+    kept = []
+    for entry in entries:
+        grams = get_5grams(entry_text(entry))
+        has_common = any(gram in common for gram in grams)
+        has_repeat = any(c > args.max_repeats for c in Counter(grams).values())
+        if not has_common and not has_repeat:
+            kept.append(entry)
 
-common_5grams = set(gram for gram, count in freq_5grams.items() if count > threshold and not is_exempt_5gram(gram))
+    write_jsonl(args.output_file, kept)
+    print(f"Kept {len(kept)} / {len(entries)} conversations -> {args.output_file}")
 
-def contains_common_5gram(text):
-    grams = get_5grams(text)
-    if any(gram in common_5grams for gram in grams):
-        return True, None
-    repeats =  repeated_5grams(text)
-    if repeats:
-        return True, repeats
-    
-    return False, None
 
-convos_data = []
-with open(TARGET_FILE, "r", encoding="utf-8") as f:
-    for line in f:
-        entry = json.loads(line)
-        convo = entry.get("conversation", "")
-        response = entry.get("response_A", "")
-        convo_text = convo_to_text(convo, response)
-        convos_data.append((convo_text, entry))
-
-# Step 3: Filter out conversations that contain any common 5-gram
-filtered_entries = []
-for convo_text, entry in convos_data:
-    flagged, repeats = contains_common_5gram(convo_text)
-    if not flagged:
-        filtered_entries.append(entry)
-
-# Step 4: Save filtered conversations to a new JSONL file
-with open(OUTPUT_FILE, "w", encoding="utf-8") as f_out:
-    for entry in filtered_entries:
-        json.dump(entry, f_out)
-        f_out.write("\n")
-
-print(f"Original number of conversations: {len(convos_data)}")
-print(f"Number of conversations after filtering: {len(filtered_entries)}")
-# print(common_5grams)
+if __name__ == "__main__":
+    main()

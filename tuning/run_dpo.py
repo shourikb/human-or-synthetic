@@ -1,66 +1,73 @@
-import wandb
 import argparse
-from config_training import ModelLoadConfig, LoraConfig, PTRunConfig, DPOTrainingConfig, DatasetConfig, SFTRunConfig
-from config import HF_MODEL_MAP
-from dpo_training import train_model_dpo
 import random
 
-if __name__ == "__main__":
+from tuning.training.dpo_training import train_model_dpo
 
-    parser = argparse.ArgumentParser(description="SFT training")
+import wandb
 
-    parser.add_argument("--model", type=str, help="llama3-8B", required=True)
-    parser.add_argument("--dataset", type=str, help="Dataset", required=True)
-    parser.add_argument("--train_size", type=int, help="Train size", required=True)
-    parser.add_argument("--learning_rate", type=float, default=2e-4, help="Learning rate")
-    parser.add_argument("--per_device_train_batch_size", type=int, default=1, help="Per device train batch size")
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=4, help="Gradient accumulation steps")
-    # parser.add_argument("--do_training", action="store_true", help="Do training")
-    # parser.add_argument("--do_inference", action="store_true", help="Do inference")
-    # parser.add_argument("--do_evaluation", action="store_true", help="Do evaluation")
+from tuning.config import DATASETS_DIR, HF_MODEL_MAP, MODELS_DIR
+from tuning.training.config_training import (
+    DatasetConfig,
+    DPOTrainingConfig,
+    LoraConfig,
+    ModelLoadConfig,
+    PTRunConfig,
+    add_hparam_args,
+    hparam_overrides,
+)
 
-    args = parser.parse_args()
 
-    print(args.__dict__)
-    lora_config = LoraConfig()
-    model_load_config = ModelLoadConfig()
-    training_args = DPOTrainingConfig()
+def parse_args():
+    parser = argparse.ArgumentParser(description="DPO training")
+    parser.add_argument("--model", type=str, required=True, choices=sorted(HF_MODEL_MAP),
+                        help="Base model family; selects the chat template")
+    parser.add_argument("--init_model", type=str, default=None,
+                        help="Checkpoint to start from, e.g. an SFT model from run_sft.py "
+                             "(default: the base model on Hugging Face)")
+    parser.add_argument("--dataset", type=str, required=True, help="Reads <data_dir>/pt-<dataset>.jsonl")
+    parser.add_argument("--train_size", type=int, required=True, help="Number of preference pairs to sample")
+    parser.add_argument("--data_dir", type=str, default=DATASETS_DIR)
+    parser.add_argument("--models_dir", type=str, default=MODELS_DIR, help="Where the trained model is saved")
+    parser.add_argument("--beta", type=float, default=None, help="Override the default DPO beta")
+    parser.add_argument("--results_csv", type=str, default=None,
+                        help="Optional CSV to append this run's summary to (e.g. for hyperparameter sweeps)")
+    parser.add_argument("--wandb_project", type=str, default="tuning")
+    add_hparam_args(parser)
+    return parser.parse_args()
 
-    dataset_config = DatasetConfig(
-        dataset = args.dataset,
-        dataset_type = "pt",
-        train_size = args.train_size,
-    )
 
-    print(dataset_config)
+def main():
+    args = parse_args()
+    print(vars(args))
 
     run_config = PTRunConfig(
-        dataset_config = dataset_config,
-        model_name_hf = HF_MODEL_MAP[args.model],
-        model_name = args.model,
-        do_training=True, # args.do_training,
-        do_inference=False, # args.do_inference,
-        do_evaluation=False, # args.do_evaluation,
-        hashs = random.randint(1,99999)
+        model_name=args.model,
+        model_path=args.init_model or HF_MODEL_MAP[args.model],
+        dataset_config=DatasetConfig(
+            dataset=args.dataset,
+            dataset_type="pt",
+            train_size=args.train_size,
+            data_dir=args.data_dir,
+        ),
+        models_dir=args.models_dir,
+        run_id=random.randint(1, 99999),
     )
-
+    overrides = hparam_overrides(args)
+    if args.beta is not None:
+        overrides["beta"] = args.beta
+    training_args = DPOTrainingConfig(**overrides)
     print(run_config)
+    print(training_args)
 
-    # training_args.learning_rate = args.learning_rate
-    # training_args.per_device_train_batch_size = args.per_device_train_batch_size
-    # training_args.gradient_accumulation_steps = args.gradient_accumulation_steps
+    with wandb.init(name=run_config.run_name, project=args.wandb_project):
+        train_model_dpo(
+            run_config=run_config,
+            lora_config=LoraConfig(),
+            model_load_config=ModelLoadConfig(),
+            training_args=training_args,
+            results_csv=args.results_csv,
+        )
 
 
-    if run_config.do_training:
-        run = wandb.init(name=run_config.run_name, project="tuning", reinit=True)
-
-        with run:
-            if run_config.pft_method == "dpo":
-                train_model_dpo(
-                    run_config = run_config,
-                    lora_config = lora_config,
-                    model_load_config = model_load_config,
-                    training_args = training_args,
-                )
-
-    print(f"********" * 20) 
+if __name__ == "__main__":
+    main()

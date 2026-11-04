@@ -1,18 +1,12 @@
-"""
-Convert reddit_comparisons.jsonl into pt-reddit.jsonl, validating that each
-row has 'chosen' and 'rejected' fields.
-"""
+import argparse
 import json
 
-INPUT_FILE = "reddit_comparisons_full.jsonl"
-OUTPUT_FILE = "pt-reddit_full.jsonl"
 
-
-def main():
+def convert(input_path, output_path):
     written = 0
     skipped = 0
 
-    with open(INPUT_FILE, "r") as fin, open(OUTPUT_FILE, "w") as fout:
+    with open(input_path, "r") as fin, open(output_path, "w") as fout:
         for line in fin:
             line = line.strip()
             if not line:
@@ -26,7 +20,15 @@ def main():
             fout.write(json.dumps({"chosen": row["chosen"], "rejected": row["rejected"]}) + "\n")
             written += 1
 
-    print(f"{INPUT_FILE} -> {OUTPUT_FILE}: written={written}, skipped={skipped}")
+    print(f"{input_path} -> {output_path}: written={written}, skipped={skipped}")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input_file", type=str, required=True, help="TL;DR comparisons as JSONL")
+    parser.add_argument("--output_file", type=str, required=True, help="e.g. pt-reddit.jsonl")
+    args = parser.parse_args()
+    convert(args.input_file, args.output_file)
 
 
 if __name__ == "__main__":

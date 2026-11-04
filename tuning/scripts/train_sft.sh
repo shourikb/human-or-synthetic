@@ -1,65 +1,19 @@
 #!/bin/bash
-#SBATCH --job-name=sft_train
-#SBATCH --output=sft_train_%A.out
-#SBATCH --error=sft_train_%A.err
-#SBATCH --partition="nlprx-lab"
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=15
-#SBATCH --gpus-per-node="a40:1"
-#SBATCH --qos="long"
-#SBATCH --exclude="clippy,xaea-12,sonny,cyborg,ig-88"
 
-export PYTHONUNBUFFERED=TRUE
+set -euo pipefail
+
+if [ $# -lt 3 ]; then
+    echo "Usage: bash tuning/scripts/train_sft.sh <model> <dataset> <train_size> [extra tuning.run_sft flags]" >&2
+    exit 1
+fi
+
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-source ~/.bashrc
-conda activate pydpo
-cd /coc/pskynet6/sbanerjee332/dpo-training
-
-# ----------------------------
-# Hyperparameter grids
-# ----------------------------
-LEARNING_RATES=(2e-4) # (2e-4 1e-4 5e-5)
-BATCH_SIZES=(1) # (1 2)
-GRAD_ACCUM=(4)  # (4 8)
-
-NUM_LR=${#LEARNING_RATES[@]}
-NUM_BS=${#BATCH_SIZES[@]}
-NUM_GA=${#GRAD_ACCUM[@]}
-
-# ----------------------------
-# Map SLURM array index -> params
-# ----------------------------
-IDX=$SLURM_ARRAY_TASK_ID
-
-LR_IDX=$(( IDX / (NUM_BS * NUM_GA) ))
-BS_IDX=$(( (IDX / NUM_GA) % NUM_BS ))
-GA_IDX=$(( IDX % NUM_GA ))
-
-LR=${LEARNING_RATES[$LR_IDX]}
-BS=${BATCH_SIZES[$BS_IDX]}
-GA=${GRAD_ACCUM[$GA_IDX]}
-
-EFFECTIVE_BS=$(( BS * GA ))
-
-echo "----------------------------------------"
-echo "SLURM TASK ID: $IDX"
-echo "Node:          $SLURMD_NODENAME"
-echo "Learning rate: $LR"
-echo "Batch size:    $BS"
-echo "Grad accum:    $GA"
-echo "Effective BS:  $EFFECTIVE_BS"
-echo "----------------------------------------"
-
-# ----------------------------
-# Run training
-# ----------------------------
-
-python run_sft.py \
-  --model llama3-8B \
-  --dataset anthropic \
-  --train_size 769 \
-  --learning_rate $LR \
-  --per_device_train_batch_size $BS \
-  --gradient_accumulation_steps $GA
+python -m tuning.run_sft \
+    --model "$1" \
+    --dataset "$2" \
+    --train_size "$3" \
+    "${@:4}"

@@ -1,3 +1,4 @@
+import argparse
 import json
 
 
@@ -32,5 +33,13 @@ def convert(input_path, output_path):
     print(f"{input_path} -> {output_path}: written={written}, skipped={skipped}")
 
 
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input_file", type=str, required=True, help="HelpSteer2 preference split as JSONL")
+    parser.add_argument("--output_file", type=str, required=True, help="e.g. pt-helpsteer2.jsonl")
+    args = parser.parse_args()
+    convert(args.input_file, args.output_file)
+
+
 if __name__ == "__main__":
-    convert("helpsteer2_train.jsonl", "pt-helpsteer2.jsonl")
+    main()

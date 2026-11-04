@@ -1,30 +1,8 @@
-"""
-Generates 5 progressively-shifting SFT/DPO training mixes from two source
-JSONL datasets (human-authored preference data + synthetic preference data).
-
-Unlike independently re-sampling each split from scratch, this keeps the
-splits NESTED:
-  - Human samples ACCUMULATE across splits: 96/4's human set = 95/5's human
-    set + exactly the new samples needed to reach 96/4's target count.
-  - Synthetic samples SHRINK across splits: 96/4's synthetic set is a
-    subsample drawn FROM 95/5's synthetic set (not from the full pool), so
-    every later split's synthetic data is a strict subset of every earlier
-    split's synthetic data.
-
-Usage:
-    python combine_datasets.py
-"""
+import argparse
 import json
+import os
 import random
 
-SFT_HUMAN_FILE = "sft-reddit.jsonl"
-SFT_SYNTHETIC_FILE = "sft-synsum.jsonl"
-
-DPO_HUMAN_FILE = "pt-reddit.jsonl"
-DPO_SYNTHETIC_FILE = "pt-synsum.jsonl"
-
-# Each entry: (split_label, n_human, n_synthetic), in the order you want them
-# processed (order doesn't matter here -- they get re-sorted internally).
 SFT_SPLITS = [
     ("955", 9499, 33817),
     ("964", 9599, 27054),
@@ -41,8 +19,8 @@ DPO_SPLITS = [
     ("991", 9899, 6750),
 ]
 
-SFT_SEED = 55  
-DPO_SEED = 55 
+SFT_SEED = 55
+DPO_SEED = 55
 
 
 def load_lines(path):
@@ -51,12 +29,6 @@ def load_lines(path):
 
 
 def build_growing_samples(splits_asc, pool, rng):
-    """
-    splits_asc: [(label, n_needed), ...] sorted ascending by n_needed.
-    Returns {label: [lines]} where each split's list contains the previous
-    split's list plus newly sampled lines to make up the difference, so
-    every split is a strict superset of the one before it.
-    """
     results = {}
     chosen = []
     remaining = list(pool)
@@ -81,12 +53,6 @@ def build_growing_samples(splits_asc, pool, rng):
 
 
 def build_shrinking_samples(splits_desc, pool, rng):
-    """
-    splits_desc: [(label, n_needed), ...] sorted descending by n_needed.
-    Returns {label: [lines]} where each split's list is a subsample of the
-    PREVIOUS split's list (not the full pool), so every split is a strict
-    subset of the one before it.
-    """
     results = {}
     current = list(pool)
     for label, n_needed in splits_desc:
@@ -100,7 +66,7 @@ def build_shrinking_samples(splits_desc, pool, rng):
     return results
 
 
-def generate_mode(mode_name, splits, seed, human_file, synthetic_file):
+def generate_mode(mode_name, splits, seed, human_file, synthetic_file, output_dir, output_suffix):
     rng = random.Random(seed)
 
     human_pool = load_lines(human_file)
@@ -135,7 +101,7 @@ def generate_mode(mode_name, splits, seed, human_file, synthetic_file):
         combined = human_lines + synthetic_lines
         rng.shuffle(combined)
 
-        out_path = f"{mode_name}-{label}_sum.jsonl"
+        out_path = os.path.join(output_dir, f"{mode_name}-{label}{output_suffix}.jsonl")
         with open(out_path, "w") as out:
             for line in combined:
                 row = json.loads(line)
@@ -148,9 +114,21 @@ def generate_mode(mode_name, splits, seed, human_file, synthetic_file):
 
 
 def main():
-    generate_mode("sft", SFT_SPLITS, SFT_SEED, SFT_HUMAN_FILE, SFT_SYNTHETIC_FILE)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--sft_human_file", type=str, required=True)
+    parser.add_argument("--sft_synthetic_file", type=str, required=True)
+    parser.add_argument("--pt_human_file", type=str, required=True)
+    parser.add_argument("--pt_synthetic_file", type=str, required=True)
+    parser.add_argument("--output_dir", type=str, required=True)
+    parser.add_argument("--output_suffix", type=str, default="")
+    args = parser.parse_args()
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    generate_mode("sft", SFT_SPLITS, SFT_SEED, args.sft_human_file, args.sft_synthetic_file,
+                  args.output_dir, args.output_suffix)
     print()
-    generate_mode("pt", DPO_SPLITS, DPO_SEED, DPO_HUMAN_FILE, DPO_SYNTHETIC_FILE)
+    generate_mode("pt", DPO_SPLITS, DPO_SEED, args.pt_human_file, args.pt_synthetic_file,
+                  args.output_dir, args.output_suffix)
 
 
 if __name__ == "__main__":

@@ -1,25 +1,11 @@
-"""
-Human-cost sensitivity analysis for Helpfulness -- 3 models side by side.
+import argparse
 
-Each subplot re-prices that model's human (HelpSteer3) cost curve across
-a sweep of assumed per-sample human annotation costs, alongside a single
-fixed synthetic curve for reference. No retraining involved: sample
-counts and win rates are fixed (measured); only the human cost axis is
-recomputed.
-
-Edit the MODELS list below (one entry per model), then run:
-    python sensitivity_helpfulness.py
-"""
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from matplotlib.colors import LinearSegmentedColormap
 
-# ── Paper style ──────────────────────────────────────────────────────────────
-# Figures are drawn at the exact size they are printed in the ACL template, so
-# the font sizes below are the real printed sizes. Include the saved PNG in
-# LaTeX at width=\textwidth (no extra scaling).
-TEXT_WIDTH = 6.30   # inches, ACL \textwidth (figure*)
+TEXT_WIDTH = 6.30
 
 plt.rcParams.update({
     "font.family": "sans-serif",
@@ -36,16 +22,14 @@ plt.rcParams.update({
     "savefig.dpi": 300, "savefig.bbox": "tight", "savefig.pad_inches": 0.02,
 })
 
-# One color per data source, shared by every figure in the paper.
-C_HUMAN = "#B0205E"      # HelpSteer3 / TL;DR
-C_SHP = "#5B6FB5"        # SHP
-C_SYNTH = "#E08A2C"      # Synthetic
+C_HUMAN = "#B0205E"
+C_SHP = "#5B6FB5"
+C_SYNTH = "#E08A2C"
 C_MIXED = "#2B2B2B"
 C_BASE = "#8A8A8A"
 
 
 def dollar_log_axis(ax, ticks=(100, 1000, 10000)):
-    """Log x-axis labelled $100, $1k, $10k instead of 10^2, 10^3, 10^4."""
     ax.set_xscale("log")
     ax.set_xticks(list(ticks))
     ax.xaxis.set_minor_formatter(mticker.NullFormatter())
@@ -57,25 +41,18 @@ def save(fig, png_path):
     fig.savefig(png_path)
     print(f"saved {png_path}")
 
-# ============================== EDIT THIS ==============================
 
-# One dict per model/panel. Add, remove, or reorder entries freely --
-# the figure adapts to however many are in this list.
 MODELS = [
     {
         "name": "Olmo3-7B",
-        # Human (HelpSteer3) sample counts.
         "human_samples": np.array([76, 153, 230, 307, 769]),
-        # Human win rates: 2 values per sample count (one per seed/run).
-        # Averaged automatically below before plotting.
         "human_winrate_runs": np.array([
-            [51.81, 55.57],   # 76 samples: run 1, run 2
-            [57.86, 56.94],   # 153 samples
-            [63.96, 62.30],   # 230 samples
-            [68.41, 69.09],   # 307 samples
-            [72.17, 72.51],   # 769 samples
+            [51.81, 55.57],
+            [57.86, 56.94],
+            [63.96, 62.30],
+            [68.41, 69.09],
+            [72.17, 72.51],
         ]) / 100,
-        # Synthetic points: (cost in $, win rate). Fixed, drawn once.
         "synthetic_cost": np.array([100, 200, 300, 400, 1000]),
         "synthetic_winrate_runs": np.array([
             [79.30, 80.57],
@@ -125,27 +102,21 @@ MODELS = [
     },
 ]
 
-# Price sweep for the human cost assumption ($/sample). Shared across panels.
 PRICE_MIN, PRICE_MAX, PRICE_STEP = 1.0, 1.6, 0.15
 
-OUTPUT_PATH = "human_cost_sensitivity_helpfulness.png"
 
-# =========================================================================
-
-
-
-# Human cost curves use one hue from light (cheapest) to dark (most
-# expensive) so their order reads at a glance; synthetic is orange, matching
-# the other figures.
 HUMAN_COST_RAMP = LinearSegmentedColormap.from_list("human_cost", ["#E7A0BC", "#5E0C31"])
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", default="human_cost_sensitivity_helpfulness.png", help="Where to save the figure")
+    args = parser.parse_args()
+
     prices = np.round(np.arange(PRICE_MIN, PRICE_MAX + 1e-9, PRICE_STEP), 2)
     colors = HUMAN_COST_RAMP(np.linspace(0, 1, len(prices)))
 
     n = len(MODELS)
-    # sharey=True: one y-range for the row (computed from all models below).
     fig, axes = plt.subplots(1, n, figsize=(TEXT_WIDTH, 2.45), sharey=True)
     if n == 1:
         axes = [axes]
@@ -153,7 +124,6 @@ def main():
     all_y, all_x = [], []
     for ax, model in zip(axes, MODELS):
         samples = model["human_samples"]
-        # Average the two per-seed runs into the value actually plotted.
         winrate = model["human_winrate_runs"].mean(axis=1)
         synthetic_winrate = model["synthetic_winrate_runs"].mean(axis=1)
 
@@ -181,7 +151,6 @@ def main():
     axes[0].set_ylabel("Win rate vs. ref.")
     axes[len(axes) // 2].set_xlabel("Annotation budget (log scale)")
 
-    # One-row legend: a text lead-in, one entry per price, then synthetic.
     lead = plt.Line2D([], [], color="none")
     price_handles = [plt.Line2D([], [], color=c, lw=1.0, marker="o", ms=2.6, mec="none") for c in colors]
     synthetic_handle = plt.Line2D([], [], color=C_SYNTH, lw=1.3, linestyle="--", marker="X", ms=4.5,
@@ -194,7 +163,7 @@ def main():
     )
 
     fig.tight_layout(w_pad=0.8)
-    save(fig, OUTPUT_PATH)
+    save(fig, args.output)
 
     for model in MODELS:
         print(f"\n=== {model['name']} ===")
@@ -210,7 +179,6 @@ def main():
             print(f"{c:>4} | {r1:.4f} | {r2:.4f} | {w:.4f}")
     shift = np.log10(PRICE_MAX / PRICE_MIN)
     print(f"\nhorizontal shift across full price range (all panels): {shift:.4f} decades")
-
 
 
 if __name__ == "__main__":
