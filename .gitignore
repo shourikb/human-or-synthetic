@@ -41,4 +41,4 @@ logs/
 *.log
 
 # Re-allow files that the data patterns above would catch
-!requirements.txt
+!requirements*.txt
