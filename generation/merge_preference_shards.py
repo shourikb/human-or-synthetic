@@ -1,49 +1,47 @@
-import json
-import os
-import glob
 import argparse
+import glob
+import json
 
-BASE_DIR = '/coc/pskynet6/sbanerjee332'
-NUM_SAMPLES = 110448
-VOTES = 32
-DATASET = "summarization"
-TOTAL_RUNS = 12
+from generation.utils import write_jsonl
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--global_offset', type=int, default=0, help='Offset used during generation')
-parser.add_argument('--total_conversations', type=int, default=110448, help='Total conversations expected')
-args = parser.parse_args()
 
-input_pattern = os.path.join(BASE_DIR, f"majority_votes_{VOTES}_{DATASET}_run*_offset{args.global_offset}.jsonl")
-output_path = os.path.join(BASE_DIR, f"majority_votes_{NUM_SAMPLES}_{DATASET}_merged_offset{args.global_offset}.jsonl")
+def parse_args():
+    parser = argparse.ArgumentParser(description="Merge per-run preference judgment shards into one file sorted by item index")
+    parser.add_argument("--input_glob", type=str, required=True,
+                        help="Glob matching shard files, e.g. 'majority_votes_32_synthetic_run*_offset0.jsonl'")
+    parser.add_argument("--output_file", type=str, required=True)
+    parser.add_argument("--global_offset", type=int, default=0)
+    parser.add_argument("--expected_count", type=int, default=None,
+                        help="If given, report indices in [global_offset, global_offset + expected_count) that are missing")
+    return parser.parse_args()
 
-all_records = []
-for path in sorted(glob.glob(input_pattern)):
-    print(f"Reading {path}...")
-    with open(path) as f:
-        for line in f:
-            try:
-                all_records.append(json.loads(line))
-            except json.JSONDecodeError as e:
-                print(f"  Skipping bad line: {e}")
 
-# Sort by global conversation index for reproducibility
-all_records.sort(key=lambda x: x.get('global_conv_idx', 0))
-print(f"Total records: {len(all_records)}")
+def main():
+    args = parse_args()
 
-with open(output_path, 'w') as f:
-    for r in all_records:
-        f.write(json.dumps(r) + "\n")
+    records = []
+    for path in sorted(glob.glob(args.input_glob)):
+        print(f"Reading {path}")
+        with open(path) as f:
+            for line in f:
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError as e:
+                    print(f"  Skipping bad line: {e}")
 
-print(f"Merged output: {output_path}")
+    records.sort(key=lambda r: r.get("global_conv_idx", 0))
+    write_jsonl(args.output_file, records)
+    indices = {r.get("global_conv_idx") for r in records}
+    print(f"Merged {len(records)} records ({len(indices)} unique indices) -> {args.output_file}")
 
-# Sanity check: count unique global_conv_idx
-indices = [r.get('global_conv_idx') for r in all_records]
-print(f"Unique conversation indices: {len(set(indices))}")
+    if args.expected_count is not None:
+        expected = set(range(args.global_offset, args.global_offset + args.expected_count))
+        missing = sorted(expected - indices)
+        if missing:
+            print(f"WARNING: {len(missing)} missing indices, first few: {missing[:20]}")
+        else:
+            print(f"All {args.expected_count} items accounted for")
 
-expected = set(range(args.global_offset, args.global_offset + args.total_conversations))
-missing = expected - set(indices)
-if missing:
-    print(f"WARNING: {len(missing)} missing indices: {sorted(missing)[:20]}...")
-else:
-    print(f"All {args.total_conversations} conversations accounted for (offset {args.global_offset}).")
+
+if __name__ == "__main__":
+    main()

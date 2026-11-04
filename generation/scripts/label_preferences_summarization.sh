@@ -1,44 +1,25 @@
 #!/bin/bash
-#SBATCH --job-name=prefsumgenerate
-#SBATCH --output=prefjudgementssum_%a.out
-#SBATCH --error=prefjudgementssum_%a.err
-#SBATCH --partition=overcap
-#SBATCH --account=overcap
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=15
-#SBATCH --gpus-per-node="a40:4"
-#SBATCH --qos=short
-#SBATCH --account=overcap
-#SBATCH --exclude=clippy,xaea-12,sonny,cyborg,ig-88,megazord
-#SBATCH --array=0-11         # 12 tasks, one per run_id
 
-export PYTHONUNBUFFERED=TRUE
+set -euo pipefail
+
+if [ $# -lt 2 ]; then
+    echo "Usage: bash generation/scripts/label_preferences_summarization.sh <input_file> <output_dir> [extra flags]" >&2
+    exit 1
+fi
+
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONUNBUFFERED=1
 export VLLM_SKIP_P2P_CHECK=1
-source ~/.bashrc
-conda activate pydpo
-# cd /srv/nlprx-lab/share5/sbanerjee332
-cd /coc/pskynet6/sbanerjee332
 
-# Each array task maps directly to a run_id (0–5)
-RUN_ID=$SLURM_ARRAY_TASK_ID
+mkdir -p "$2"
 
-# All 4 GPUs on this node, indexed 0–3 locally
-GPU_IDS="0,1,2,3"
-
-echo "================================================"
-echo "SLURM Job ID:     $SLURM_JOB_ID"
-echo "SLURM Array Task: $SLURM_ARRAY_TASK_ID"
-echo "Run ID:           $RUN_ID"
-echo "Node:             $SLURMD_NODENAME"
-echo "GPUs:             $GPU_IDS"
-echo "================================================"
-
-python -u prefgenerator_summary.py \
-    --run_id=$RUN_ID \
-    --total_runs=12 \
-    --gpu_id=$GPU_IDS \
-    --num_samples=32 \
-    --batch_size=64 \
-    --output_dir=/coc/pskynet6/sbanerjee332 \
-    --global_offset=0
+python -m generation.label_preferences_summarization \
+    --input_file "$1" \
+    --output_dir "$2" \
+    --run_id "${RUN_ID:-0}" \
+    --total_runs "${TOTAL_RUNS:-1}" \
+    --gpu_id "${GPU_IDS:-0,1,2,3}" \
+    --num_samples 32 \
+    --batch_size 64 \
+    "${@:3}"

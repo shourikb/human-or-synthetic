@@ -1,31 +1,21 @@
 #!/bin/bash
-#SBATCH --job-name=generatingresponses
-#SBATCH --output=generatingresponses_%A.out
-#SBATCH --error=generatingresponses_%A.err
-#SBATCH --partition=overcap
-#SBATCH --account=overcap
-#SBATCH --nodes=1 --exclusive
-#SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=15
-#SBATCH --gpus-per-node="a40:1"
-#SBATCH --qos="short"
-#SBATCH --exclude="clippy,xaea-12,sonny,ig-88,kitt"
 
-export PYTHONUNBUFFERED=TRUE
+set -euo pipefail
 
-source ~/.bashrc
-conda activate pydpo
-cd /coc/pskynet6/sbanerjee332/dpo-training
+if [ $# -lt 4 ]; then
+    echo "Usage: bash tuning/scripts/generate_responses.sh <model_path> <model_name> <test_file> <output_file> [extra flags]" >&2
+    exit 1
+fi
 
-echo "Node:          $SLURMD_NODENAME"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONUNBUFFERED=1
 
-MODEL="models555/qwen2.5-sft-a-400_pt-anthropic-307_54993" # "unsloth/Meta-Llama-3.1-8B" 
-
-# Current seed is 55
-
-python generate_responses2.py \
-    --model "$MODEL" \
-    --model_name qwen2.5-7B \
-    --input_file datasets/anthropic_test.jsonl \
+python -m tuning.inference.generate_responses \
+    --model "$1" \
+    --model_name "$2" \
+    --input_file "$3" \
+    --output_file "$4" \
     --num_samples 2048 \
-    --batch_size 64
+    --batch_size 64 \
+    "${@:5}"

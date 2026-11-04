@@ -1,74 +1,57 @@
-import json
+import argparse
 from collections import Counter
-from nltk.util import ngrams
-import nltk
 
-nltk.download('punkt')
+import nltk
+from nltk.util import ngrams
+
+from generation.utils import read_jsonl, write_jsonl
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Drop posts containing corpus-common or self-repeated 5-grams")
+    parser.add_argument("--reference_files", type=str, nargs="+", required=True,
+                        help="Files used to compute corpus-wide 5-gram frequencies")
+    parser.add_argument("--input_file", type=str, required=True)
+    parser.add_argument("--output_file", type=str, required=True)
+    parser.add_argument("--threshold_frac", type=float, default=0.05,
+                        help="A 5-gram is common if it appears more than this fraction of reference posts")
+    parser.add_argument("--max_repeats", type=int, default=2,
+                        help="Drop a post if any 5-gram repeats more than this many times within it")
+    return parser.parse_args()
+
 
 def get_5grams(text):
-    tokens = nltk.word_tokenize(text.lower())
-    return list(ngrams(tokens, 5))
+    return list(ngrams(nltk.word_tokenize(text.lower()), 5))
 
-REFERENCE_FILES = ["sample8.jsonl", "sample9.jsonl"]  # files to compute 5-gram frequencies from
-TARGET_FILE = "sample9.jsonl"        # file to filter
-OUTPUT_FILE = "filtered_sample9.jsonl"
-MAX_REPEATS_IN_POST = 2   # allow up to 2 repeats within a single post, filter if >2
-THRESHOLD_FRAC = 0.05  # Adjust this threshold as needed
 
-def repeated_5grams(text):
-    grams = get_5grams(text)
-    counts = Counter(grams)
-    return [gram for gram, c in counts.items() if c > MAX_REPEATS_IN_POST]
+def main():
+    args = parse_args()
+    nltk.download("punkt", quiet=True)
 
-all_5grams = []
-posts_data = []
+    freq = Counter()
+    num_reference = 0
+    for path in args.reference_files:
+        for entry in read_jsonl(path):
+            freq.update(get_5grams(entry.get("post", "")))
+            num_reference += 1
 
-# Step 1: Read all posts and extract all 5-grams (based on post text only, not summaries)
-for filepath in REFERENCE_FILES:
-    with open(filepath, "r", encoding="utf-8") as f:
-        for line in f:
-            entry = json.loads(line)
-            post_text = entry.get("post", "")
-            posts_data.append((post_text, entry))
-            all_5grams.extend(get_5grams(post_text))
+    threshold = int(num_reference * args.threshold_frac)
+    print(f"5-gram frequency threshold: {threshold}")
+    common = {gram for gram, count in freq.items() if count > threshold}
+    print(f"Common 5-grams: {common}")
 
-# Step 2: Count frequencies of all 5-grams
-freq_5grams = Counter(all_5grams)
-threshold = int(len(posts_data) * THRESHOLD_FRAC)
-print("5-gram frequency threshold for filtering: ", threshold)
+    entries = read_jsonl(args.input_file)
+    kept = []
+    for entry in entries:
+        grams = get_5grams(entry.get("post", ""))
+        has_common = any(gram in common for gram in grams)
+        has_repeat = any(c > args.max_repeats for c in Counter(grams).values())
+        if not has_common and not has_repeat:
+            kept.append(entry)
 
-common_5grams = set(gram for gram, count in freq_5grams.items() if count > threshold)
+    write_jsonl(args.output_file, kept)
+    print(f"Kept {len(kept)} / {len(entries)} posts -> {args.output_file}")
 
-def contains_common_5gram(text):
-    grams = get_5grams(text)
-    if any(gram in common_5grams for gram in grams):
-        return True, None
-    repeats = repeated_5grams(text)
-    if repeats:
-        return True, repeats
 
-    return False, None
-
-posts_data = []
-with open(TARGET_FILE, "r", encoding="utf-8") as f:
-    for line in f:
-        entry = json.loads(line)
-        post_text = entry.get("post", "")
-        posts_data.append((post_text, entry))
-
-# Step 3: Filter out posts that contain any common 5-gram (based on post text only)
-filtered_entries = []
-for post_text, entry in posts_data:
-    flagged, repeats = contains_common_5gram(post_text)
-    if not flagged:
-        filtered_entries.append(entry)
-
-# Step 4: Save filtered posts to a new JSONL file
-with open(OUTPUT_FILE, "w", encoding="utf-8") as f_out:
-    for entry in filtered_entries:
-        json.dump(entry, f_out)
-        f_out.write("\n")
-
-print(f"Original number of posts: {len(posts_data)}")
-print(f"Number of posts after filtering: {len(filtered_entries)}")
-print(common_5grams)
+if __name__ == "__main__":
+    main()

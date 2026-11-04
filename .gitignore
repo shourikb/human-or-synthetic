@@ -1,38 +1,44 @@
-# Deny everything by default; this directory also holds data, models and job logs
-*
-!*/
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
 
-# Code and config
-!*.py
-!*.sh
-!*.conf
-!*.yaml
-!*.yml
-!.gitignore
-!README.md
-!requirements.txt
-!environment.yml
-!assets/**
+# Environments and editors
+.venv/
+venv/
+.env
+.vscode/
+.idea/
+.DS_Store
 
-# Data, outputs and caches
+# Data (generated or downloaded; not part of the release)
 *.jsonl
 *.json
 *.csv
 *.txt
-*.out
-*.err
-*.pyc
-__pycache__/
-Miniconda3-*.sh
-huggingface/
+*.arrow
+*.bin
+*.parquet
+tuning/datasets/
+
+# Models and training outputs
+tuning/models/
+outputs/
 wandb/
 unsloth_compiled_cache/
 _unsloth_sentencepiece_temp/
-tokenizer_tmp/
-models*/
-outputs/
-seed-*/
-old_responses/
 
-# requirements.txt is re-allowed after *.txt
+# Figures produced by analysis/plots (the paper figure lives in assets/)
+*.png
+*.pdf
+!assets/**
+
+# Logs
+logs/
+*.out
+*.err
+*.log
+
+# Re-allow files that the data patterns above would catch
 !requirements.txt

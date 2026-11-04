@@ -1,42 +1,12 @@
-"""
-Plots win rate vs. cost for each model family, with four curves per plot:
-HelpSteer3 (human), SHP (human), Anthropic HH (human), and Synthetic
-(AI-generated).
-
-Fill in the WIN_RATES dict below with real numbers before running --
-placeholders are marked None and will be skipped (that point just won't
-be plotted, rather than erroring), so you can run this incrementally as
-results come in.
-
-Each point's win rate can be given as:
-  - None                  -> point skipped entirely
-  - a single number        -> plotted with no error bar (only one run so far)
-  - a list of numbers       -> plotted as mean, with min/max shown as an
-                               error bar (works for 2, 3, or more runs)
-
-This also applies to BASE_WIN_RATE (the base-model point at x=BASE_X_POSITION):
-a scalar plots with no error bar, a list plots mean +/- min/max, and the
-dashed reference line uses the mean of that list.
-
-The figure has two rows per model: the top row shows mean +/- min/max (as
-before), the bottom row shows every individual run overlaid as its own line
-(one line per run index, same color per source, differentiated by linestyle),
-so you can see the raw per-seed curves rather than only the summarized one.
-
-Usage:
-    python plot_winrate_vs_cost.py
-"""
+import argparse
+import os
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import matplotlib.lines as mlines
 import numpy as np
 
-# ── Paper style ──────────────────────────────────────────────────────────────
-# Figures are drawn at the exact size they are printed in the ACL template, so
-# the font sizes below are the real printed sizes. Include the saved PNG in
-# LaTeX at width=\textwidth (no extra scaling).
-TEXT_WIDTH = 6.30   # inches, ACL \textwidth (figure*)
+TEXT_WIDTH = 6.30
 
 plt.rcParams.update({
     "font.family": "sans-serif",
@@ -53,17 +23,15 @@ plt.rcParams.update({
     "savefig.dpi": 300, "savefig.bbox": "tight", "savefig.pad_inches": 0.02,
 })
 
-# One color per data source, shared by every figure in the paper.
-C_HUMAN = "#B0205E"      # HelpSteer3 / TL;DR
-C_SHP = "#5B6FB5"        # SHP
-C_HH = "#2A9D8F"         # Anthropic HH
-C_SYNTH = "#E08A2C"      # Synthetic
+C_HUMAN = "#B0205E"
+C_SHP = "#5B6FB5"
+C_HH = "#2A9D8F"
+C_SYNTH = "#E08A2C"
 C_MIXED = "#2B2B2B"
 C_BASE = "#8A8A8A"
 
 
 def dollar_log_axis(ax, ticks=(100, 1000, 10000)):
-    """Log x-axis labelled $100, $1k, $10k instead of 10^2, 10^3, 10^4."""
     ax.set_xscale("log")
     ax.set_xticks(list(ticks))
     ax.xaxis.set_minor_formatter(mticker.NullFormatter())
@@ -75,19 +43,8 @@ def save(fig, png_path):
     fig.savefig(png_path)
     print(f"saved {png_path}")
 
-# ── Cost basis ────────────────────────────────────────────────────────────
-HUMAN_COST_PER_SAMPLE = 1.30  # $/sample, as given
+HUMAN_COST_PER_SAMPLE = 1.30
 
-# ── Data ─────────────────────────────────────────────────────────────────
-# Structure: MODEL -> SOURCE -> {budget_label: (cost_dollars, win_rate)}
-# win_rate is None, a single number, or a list of numbers (one per run) --
-# see module docstring above.
-#
-# For HelpSteer3, SHP, and HH, budgets are given directly in $ for the $100-$1000
-# tiers (matching your synthetic tiers), plus a 10k-sample point whose cost
-# is derived from HUMAN_COST_PER_SAMPLE (10,000 * $1.30 = $13,000).
-#
-# For Synthetic, use the actual dollar cost tiers you trained at.
 
 WIN_RATES = {
     "Olmo3-7B": {
@@ -185,7 +142,7 @@ WIN_RATES = {
             "$100": (100, [56.4, 57.91]),
             "$200": (200, [54.73, 54.69]),
             "$300": (300, [52, 51.81]),
-            "$400": (400, [50.68, 48.54]), 
+            "$400": (400, [50.68, 48.54]),
             "$1000": (1000, [53.37, 54.2]),
             "10,000 samples": (10000 * HUMAN_COST_PER_SAMPLE, [70.85, 66.6]),
         },
@@ -204,17 +161,12 @@ WIN_RATES = {
 
 }
 
-# Now supports the same scalar / list-of-runs format as WIN_RATES entries.
-# e.g. "Olmo3-7B": [51.31, 52.4, 50.9]  -> plotted as mean with min/max error bar.
 BASE_WIN_RATE = {
     "Olmo3-7B": [51.31, 55.27],
     "Llama3.1-8B": [52.93, 58.01],
     "Qwen2.5-7B": [59.86, 61.87],
 }
 
-# ── Styling ─────────────────────────────────────────────────────────────
-# Color = data source (same colors in every figure). Marker shape also
-# differs per source so the curves stay distinguishable in grayscale.
 STYLE = {
     "HelpSteer3": dict(color=C_HUMAN, marker="o", label="HelpSteer3 (human)"),
     "SHP": dict(color=C_SHP,   marker="s", label="SHP (human)"),
@@ -222,9 +174,6 @@ STYLE = {
     "Synthetic": dict(color=C_SYNTH, marker="X", label="Synthetic (AI-generated)"),
 }
 
-# Per-run styling for the all-runs figure. Run 1 is drawn thick and solid
-# underneath; later runs are thinner and dashed on top, so both stay visible
-# where the seeds agree.
 RUN_COLORS = ["#2F6DB5", "#E08A2C", "#1B9E77", "#7570B3", "#E7298A"]
 RUN_MARKERS = ["o", "X", "s", "^", "D"]
 RUN_LINESTYLES = ["-", (0, (3, 1.5)), ":", "-."]
@@ -234,8 +183,6 @@ DISPLAY_NAME = {"TLDR": "TL;DR", "HH": "Anthropic HH"}
 
 
 def _mean_min_max(rate):
-    """Normalize a win-rate entry (None / scalar / list) into (mean, min, max).
-    Returns None if the entry is None (point should be skipped)."""
     if rate is None:
         return None
     if isinstance(rate, (list, tuple)):
@@ -248,7 +195,6 @@ def _mean_min_max(rate):
 
 
 def _run_value(rate, run_idx):
-    """Value for a specific run index out of a win-rate entry, or None."""
     if rate is None:
         return None
     if isinstance(rate, (list, tuple)):
@@ -260,8 +206,6 @@ def _run_value(rate, run_idx):
 
 
 def _style_axis(ax, title, yticks=np.arange(0, 101, 20)):
-    """Shared axis styling. Win rates are stored in percent (0-100) and
-    labelled as fractions (0.0-1.0), as before."""
     dollar_log_axis(ax)
     ax.set_xlim(12, 2.2e4)
     ax.set_ylim(0, 100)
@@ -286,7 +230,6 @@ def _max_runs(*entries):
 
 
 def plot_model(ax, model_name, sources, base_rate):
-    """Mean per point, with min/max across runs shown as an error bar."""
     for source_name, points in sources.items():
         style = STYLE[source_name]
         costs, means, err_low, err_high = [], [], [], []
@@ -311,7 +254,6 @@ def plot_model(ax, model_name, sources, base_rate):
 
 
 def plot_source_runs(ax, model_name, source_name, points, base_rate):
-    """One subplot: every individual run for a single data source."""
     max_runs = _max_runs(base_rate, *[rate for _, (_, rate) in points.items()])
     for run_idx in range(max_runs):
         costs, vals = [], []
@@ -338,9 +280,7 @@ def plot_source_runs(ax, model_name, source_name, points, base_rate):
     ax.set_yticklabels(["0", "", "0.5", "", "1"])
 
 
-def make_all_runs_by_dataset_figure():
-    """Rows = models, columns = data sources, each subplot showing every
-    individual run as its own line."""
+def make_all_runs_by_dataset_figure(output_dir):
     source_order = ['HelpSteer3', 'SHP', 'HH', 'Synthetic']
     n_models = len(WIN_RATES)
     n_sources = len(source_order)
@@ -353,8 +293,6 @@ def make_all_runs_by_dataset_figure():
             plot_source_runs(axes[row][col], model_name, source_name,
                              sources.get(source_name, {}), base_rate)
         axes[row][0].set_ylabel(f"{model_name}\nWin rate vs. ref.")
-    # With 4 columns the "Model — Source" titles collide, so label columns by
-    # source (top row only) and rows by model (y-axis label) instead.
     for row in range(n_models):
         for col, source_name in enumerate(source_order):
             axes[row][col].set_title(
@@ -365,10 +303,14 @@ def make_all_runs_by_dataset_figure():
     h, l = axes[0][0].get_legend_handles_labels()
     fig.legend(h, l, loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=len(h))
     fig.tight_layout(h_pad=0.9, w_pad=0.6)
-    save(fig, "winrate_all_runs_by_dataset.png")
+    save(fig, os.path.join(output_dir, "winrate_all_runs_by_dataset.png"))
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output_dir", default=".", help="Where to save the figures")
+    args = parser.parse_args()
+
     n_models = len(WIN_RATES)
     fig, axes = plt.subplots(1, n_models, figsize=(TEXT_WIDTH, 1.95), sharey=True, squeeze=False)
     axes = axes[0]
@@ -387,9 +329,9 @@ def main():
                bbox_to_anchor=(0.5, 1.0), ncol=len(seen), handlelength=1.8, columnspacing=1.5)
 
     fig.tight_layout(w_pad=0.8)
-    save(fig, "winrate_vs_cost.png")
+    save(fig, os.path.join(args.output_dir, "winrate_vs_cost.png"))
 
-    make_all_runs_by_dataset_figure()
+    make_all_runs_by_dataset_figure(args.output_dir)
 
 
 if __name__ == "__main__":
