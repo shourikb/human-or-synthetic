@@ -1,6 +1,8 @@
 import re
 from unsloth.chat_templates import get_chat_template
 
+from tuning.utils.conversation import split_conversation, split_prompt_and_response
+
 
 CHAT_TEMPLATE_MAP = {
     "llama3-8B": "chatml",
@@ -17,28 +19,6 @@ def get_model_family(model_name):
     if model_name.startswith("qwen2.5"):
         return "qwen2.5-7B"
     raise ValueError(f"Could not infer model family from model_name={model_name!r}")
-
-
-def split_conversation(text):
-    text = text.strip()
-    turns = re.split(r'(?=Human:|Assistant:)', text)
-    messages = []
-    for turn in turns:
-        turn = turn.strip()
-        if not turn:
-            continue
-        if turn.startswith("Human:"):
-            messages.append({"role": "user", "content": turn[len("Human:"):].strip()})
-        elif turn.startswith("Assistant:"):
-            messages.append({"role": "assistant", "content": turn[len("Assistant:"):].strip()})
-    return messages
-
-
-def split_prompt_and_response(text):
-    messages = split_conversation(text)
-    if not messages or messages[-1]["role"] != "assistant":
-        raise ValueError(f"Expected conversation to end in an Assistant turn: {text[:200]}")
-    return messages[:-1], messages[-1]["content"]
 
 
 def prepare_dpo_fields(example):
