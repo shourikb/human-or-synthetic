@@ -1,6 +1,0 @@
-Miniconda3-latest-Linux-x86_64.sh filter=lfs diff=lfs merge=lfs -text
-batch_output.jsonl filter=lfs diff=lfs merge=lfs -text
-lid.176.bin filter=lfs diff=lfs merge=lfs -text
-*.sh filter=lfs diff=lfs merge=lfs -text
-*.jsonl filter=lfs diff=lfs merge=lfs -text
-*.bin filter=lfs diff=lfs merge=lfs -text
