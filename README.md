@@ -4,7 +4,7 @@ Code for the paper Human or Synthetic? What a Fixed Budget Buys for Post-Trainin
 
 ![Method](assets/method.png)
 
-Link - [ARXIV_URL](ARXIV_URL)
+Paper: [arXiv:2611.16895](https://arxiv.org/abs/2611.16895)
 
 ### Install
 
@@ -33,7 +33,7 @@ Training data goes in `tuning/datasets/`:
 - `pt-<dataset>.jsonl`: preference pairs, one `{"chosen": ..., "rejected": ...}` per line, each a `Human: ... Assistant: ...` transcript.
 - `sft-<dataset>.jsonl`: SFT examples, one `{"messages": [...]}` per line.
 
-The synthetic datasets are on Hugging Face at [DATASET_REPO_ID](https://huggingface.co/datasets/DATASET_REPO_ID).
+The synthetic datasets are on Hugging Face at [liteshadow4/synthetic-pref-tulu3](https://huggingface.co/datasets/liteshadow4/synthetic-pref-tulu3).
 
 ### Run
 
@@ -69,6 +69,14 @@ bash tuning/scripts/judge.sh helpfulness gptoss responses/<run_name>.jsonl tunin
 
 If you find our work or code useful, please cite the paper:
 
-```
-BIBTEX
+```bibtex
+@misc{banerjee2026humansyntheticfixedbudget,
+      title={Human or Synthetic? What a Fixed Budget Buys for Post-Training},
+      author={Shourik Banerjee and Ethan Mendes and Mohit Raghavendra and Wei Xu and Alan Ritter},
+      year={2026},
+      eprint={2611.16895},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2611.16895},
+}
 ```
